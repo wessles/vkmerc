@@ -147,7 +147,7 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="FlyCam.cpp" />
-    <ClCompile Include="Main.cpp" />
+    <ClCompile Include="VulkanDemo.cpp" />
   </ItemGroup>
   <ItemGroup>
     <None Include="compile_shaders.bat" />
@@ -156,6 +156,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="FlyCam.h" />
+    <ClInclude Include="Bvk.hpp" />
     <ClInclude Include="stb_image.h" />
     <ClInclude Include="tiny_obj_loader.h" />
   </ItemGroup>
