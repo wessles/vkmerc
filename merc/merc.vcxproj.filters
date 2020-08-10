@@ -23,14 +23,20 @@
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <None Include="shader.frag">
+    <None Include="compile_shaders.bat">
       <Filter>Resource Files</Filter>
     </None>
     <None Include="shader.vert">
-      <Filter>Resource Files</Filter>
+      <Filter>Source Files</Filter>
     </None>
-    <None Include="compile_shaders.bat">
-      <Filter>Resource Files</Filter>
+    <None Include="shader.frag">
+      <Filter>Source Files</Filter>
+    </None>
+    <None Include="noproj.vert">
+      <Filter>Source Files</Filter>
+    </None>
+    <None Include="blit.frag">
+      <Filter>Source Files</Filter>
     </None>
   </ItemGroup>
   <ItemGroup>
