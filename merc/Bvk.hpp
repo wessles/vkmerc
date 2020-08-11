@@ -527,7 +527,8 @@ namespace bvk::image {
 		uint32_t width, uint32_t height, uint32_t mipLevels, VkSampleCountFlagBits numSamples,
 		VkFormat format, VkImageTiling tiling,
 		VkImageUsageFlags usage, VkMemoryPropertyFlags properties,
-		VkImage& image, VkDeviceMemory& imageMemory)
+		VkImage& image, VkDeviceMemory& imageMemory,
+		VkImageCreateFlags imageCreateFlags = 0, uint32_t arrayLayers = 1)
 	{
 		// set up image create, as a dst for the staging buffer we just made
 		VkImageCreateInfo imageInfo{};
@@ -537,14 +538,14 @@ namespace bvk::image {
 		imageInfo.extent.height = height;
 		imageInfo.extent.depth = 1;
 		imageInfo.mipLevels = mipLevels;
-		imageInfo.arrayLayers = 1;
+		imageInfo.arrayLayers = arrayLayers;
 		imageInfo.format = format;
 		imageInfo.tiling = tiling;
 		imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 		imageInfo.usage = usage;
 		imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 		imageInfo.samples = numSamples;
-		imageInfo.flags = 0; // Optional
+		imageInfo.flags = imageCreateFlags;
 
 		if (vkCreateImage(device, &imageInfo, nullptr, &image) != VK_SUCCESS) {
 			throw std::runtime_error("Failed to create image!");
@@ -564,7 +565,7 @@ namespace bvk::image {
 
 		vkBindImageMemory(device, image, imageMemory, 0);
 	}
-	void transitionImageLayout(VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout, uint32_t mipLevels) {
+	void transitionImageLayout(VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout, uint32_t mipLevels, uint32_t layerCount = 1) {
 		VkCommandBuffer commandBuffer = bvk::create::beginSingleTimeCommands();
 
 		VkImageMemoryBarrier barrier{};
@@ -580,7 +581,7 @@ namespace bvk::image {
 		barrier.subresourceRange.baseMipLevel = 0;
 		barrier.subresourceRange.levelCount = mipLevels;
 		barrier.subresourceRange.baseArrayLayer = 0;
-		barrier.subresourceRange.layerCount = 1;
+		barrier.subresourceRange.layerCount = layerCount;
 
 		VkPipelineStageFlags sourceStage;
 		VkPipelineStageFlags destinationStage;
@@ -630,7 +631,7 @@ namespace bvk::image {
 
 		bvk::create::endSingleTimeCommands(commandBuffer);
 	}
-	void copyBufferToImage(VkBuffer buffer, VkImage image, uint32_t width, uint32_t height) {
+	void copyBufferToImage(VkBuffer buffer, VkImage image, uint32_t width, uint32_t height, uint32_t layerCount = 1) {
 		VkCommandBuffer commandBuffer = bvk::create::beginSingleTimeCommands();
 
 		VkBufferImageCopy region{};
@@ -641,7 +642,7 @@ namespace bvk::image {
 		region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
 		region.imageSubresource.mipLevel = 0;
 		region.imageSubresource.baseArrayLayer = 0;
-		region.imageSubresource.layerCount = 1;
+		region.imageSubresource.layerCount = layerCount;
 
 		region.imageOffset = { 0, 0, 0 };
 		region.imageExtent = {
@@ -752,17 +753,17 @@ namespace bvk {
 			}
 		}
 
-		VkImageView createImageView(VkImage image, VkFormat format, VkImageAspectFlags aspectFlags, uint32_t mipLevels) {
+		VkImageView createImageView(VkImage image, VkFormat format, VkImageAspectFlags aspectFlags, uint32_t mipLevels, VkImageViewType imageViewType = VK_IMAGE_VIEW_TYPE_2D, uint32_t layerCount = 1) {
 			VkImageViewCreateInfo viewInfo{};
 			viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
 			viewInfo.image = image;
-			viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+			viewInfo.viewType = imageViewType;
 			viewInfo.format = format;
 			viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
 			viewInfo.subresourceRange.baseMipLevel = 0;
 			viewInfo.subresourceRange.levelCount = mipLevels;
 			viewInfo.subresourceRange.baseArrayLayer = 0;
-			viewInfo.subresourceRange.layerCount = 1;
+			viewInfo.subresourceRange.layerCount = layerCount;
 			viewInfo.subresourceRange.aspectMask = aspectFlags;
 
 			VkImageView imageView;

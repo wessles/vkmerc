@@ -251,6 +251,8 @@
     <None Include="noproj.vert" />
     <None Include="shader.frag" />
     <None Include="shader.vert" />
+    <None Include="skybox.frag" />
+    <None Include="skybox.vert" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="FlyCam.h" />
