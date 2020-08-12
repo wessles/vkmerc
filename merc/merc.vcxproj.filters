@@ -44,6 +44,12 @@
     <None Include="skybox.vert">
       <Filter>Source Files</Filter>
     </None>
+    <None Include="eval.tese">
+      <Filter>Source Files</Filter>
+    </None>
+    <None Include="control.tesc">
+      <Filter>Source Files</Filter>
+    </None>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="stb_image.h">
@@ -56,6 +62,12 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="Bvk.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="nuklear-glfw-vulkan.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="nuklear.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>

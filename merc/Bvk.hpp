@@ -885,6 +885,8 @@ namespace bvk {
 		deviceFeatures.samplerAnisotropy = VK_TRUE;
 		// enable sample shading feature for the device, so that edges AND interiors of textures are MSAA'd
 		deviceFeatures.sampleRateShading = VK_TRUE;
+		deviceFeatures.tessellationShader = VK_TRUE;
+		deviceFeatures.fillModeNonSolid = VK_TRUE;
 
 
 		VkDeviceCreateInfo createInfo{};

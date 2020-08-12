@@ -491,7 +491,7 @@ private:
 			uboLayoutBinding.descriptorCount = 1;
 			uboLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
 			uboLayoutBinding.pImmutableSamplers = nullptr;
-			uboLayoutBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+			uboLayoutBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT | VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT;
 
 			VkDescriptorSetLayoutBinding samplerLayoutBinding{};
 			samplerLayoutBinding.binding = 1;
@@ -580,12 +580,8 @@ private:
 	}
 
 	void createGraphicsPipelines() {
-		// shader stage creation
-		std::array<VkPipelineShaderStageCreateInfo, 2> shaderStages{};
-
 		VkPipelineInputAssemblyStateCreateInfo inputAssembly{};
 		inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
-		inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
 		inputAssembly.primitiveRestartEnable = VK_FALSE;
 
 		// vertex pipeline stage input (incomplete, will add actual descriptions later, per pipeline)
@@ -642,10 +638,15 @@ private:
 		multisampling.sampleShadingEnable = VK_TRUE; // enable sample shading in the pipeline
 		multisampling.minSampleShading = .2f; // min fraction for sample shading; closer to one is smoother
 
+		// tesselations
+		VkPipelineTessellationStateCreateInfo tesselation{};
+		tesselation.sType = VK_STRUCTURE_TYPE_PIPELINE_TESSELLATION_STATE_CREATE_INFO;
+		tesselation.pNext = nullptr;
+		tesselation.flags = 0;
+		tesselation.patchControlPoints = 3;
+
 		VkGraphicsPipelineCreateInfo pipelineInfo{};
 		pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
-		pipelineInfo.stageCount = static_cast<uint32_t>(shaderStages.size());
-		pipelineInfo.pStages = shaderStages.data();
 		pipelineInfo.pVertexInputState = &vertexInputInfo;
 		pipelineInfo.pInputAssemblyState = &inputAssembly;
 		pipelineInfo.pViewportState = &viewportState;
@@ -657,7 +658,6 @@ private:
 		pipelineInfo.pDynamicState = nullptr; // Optional
 		pipelineInfo.basePipelineHandle = VK_NULL_HANDLE; // Optional
 		pipelineInfo.basePipelineIndex = -1; // Optional
-
 
 		// Regular pipeline begins
 		{
@@ -674,28 +674,49 @@ private:
 			vertexInputInfo.pVertexBindingDescriptions = &bindingDescription; // Optional
 			vertexInputInfo.pVertexAttributeDescriptions = attributeDescriptions.data(); // Optional
 
+
+			std::array<VkPipelineShaderStageCreateInfo, 4> shaderStages{};
+
+			// Set up tesselation shader
+			// required topology for tess
+			inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_PATCH_LIST;
+			regularPipelineInfo.pTessellationState = &tesselation;
+			VkShaderModule tessControlModule = bvk::create::createShaderModule(readFile("control.spv"));
+			VkShaderModule tessEvalModule = bvk::create::createShaderModule(readFile("eval.spv"));
+			shaderStages[0] = bvk::create::createShaderStage(tessControlModule, VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT);
+			shaderStages[1] = bvk::create::createShaderStage(tessEvalModule, VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT);
+
 			// specify shaders
 			VkShaderModule vertModule = bvk::create::createShaderModule(readFile("vert.spv"));
 			VkShaderModule fragModule = bvk::create::createShaderModule(readFile("frag.spv"));
-			shaderStages[0] = bvk::create::createShaderStage(vertModule, VK_SHADER_STAGE_VERTEX_BIT);
-			shaderStages[1] = bvk::create::createShaderStage(fragModule, VK_SHADER_STAGE_FRAGMENT_BIT);
+			shaderStages[2] = bvk::create::createShaderStage(vertModule, VK_SHADER_STAGE_VERTEX_BIT);
+			shaderStages[3] = bvk::create::createShaderStage(fragModule, VK_SHADER_STAGE_FRAGMENT_BIT);
+
+			regularPipelineInfo.stageCount = static_cast<uint32_t>(shaderStages.size());
+			regularPipelineInfo.pStages = shaderStages.data();
 
 			VkResult result = vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &regularPipelineInfo, nullptr, &pipelines.attachmentWrite);
 			if (result != VK_SUCCESS) {
 				throw std::runtime_error("Failed to create graphics pipeline!");
 			}
 
+
+			// set back to correct topology
+			inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+
+			vkDestroyShaderModule(device, tessControlModule, nullptr);
+			vkDestroyShaderModule(device, tessEvalModule, nullptr);
 			vkDestroyShaderModule(device, vertModule, nullptr);
 			vkDestroyShaderModule(device, fragModule, nullptr);
 		}
 
 		// Skybox Pipeline
 		{
-			VkGraphicsPipelineCreateInfo skyboxPipeline = pipelineInfo;
+			VkGraphicsPipelineCreateInfo skyboxPipelineInfo = pipelineInfo;
 
-			skyboxPipeline.renderPass = renderPass;
-			skyboxPipeline.subpass = 0;
-			skyboxPipeline.layout = pipelineLayouts.attachmentWrite;
+			skyboxPipelineInfo.renderPass = renderPass;
+			skyboxPipelineInfo.subpass = 0;
+			skyboxPipelineInfo.layout = pipelineLayouts.attachmentWrite;
 			// don't write to depth buffer
 			depthStencil.depthWriteEnable = false;
 
@@ -706,13 +727,18 @@ private:
 			vertexInputInfo.pVertexBindingDescriptions = &bindingDescription; // Optional
 			vertexInputInfo.pVertexAttributeDescriptions = attributeDescriptions.data(); // Optional
 
+			std::array<VkPipelineShaderStageCreateInfo, 2> shaderStages{};
+
 			// specify shaders
 			VkShaderModule vertModule = bvk::create::createShaderModule(readFile("vert_skybox.spv"));
 			VkShaderModule fragModule = bvk::create::createShaderModule(readFile("frag_skybox.spv"));
 			shaderStages[0] = bvk::create::createShaderStage(vertModule, VK_SHADER_STAGE_VERTEX_BIT);
 			shaderStages[1] = bvk::create::createShaderStage(fragModule, VK_SHADER_STAGE_FRAGMENT_BIT);
 
-			VkResult result = vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &skyboxPipeline, nullptr, &pipelines.skybox);
+			skyboxPipelineInfo.stageCount = static_cast<uint32_t>(shaderStages.size());
+			skyboxPipelineInfo.pStages = shaderStages.data();
+
+			VkResult result = vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &skyboxPipelineInfo, nullptr, &pipelines.skybox);
 			if (result != VK_SUCCESS) {
 				throw std::runtime_error("Failed to create graphics pipeline!");
 			}
@@ -720,6 +746,8 @@ private:
 			vkDestroyShaderModule(device, vertModule, nullptr);
 			vkDestroyShaderModule(device, fragModule, nullptr);
 		}
+
+		rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
 
 		// Blit pipeline (for PostFX) begins
 		{
@@ -737,11 +765,16 @@ private:
 			vertexInputInfo.pVertexBindingDescriptions = &bindingDescription2; // Optional
 			vertexInputInfo.pVertexAttributeDescriptions = attributeDescriptions2.data(); // Optional
 
+			std::array<VkPipelineShaderStageCreateInfo, 2> shaderStages{};
+
 			// specify shaders
 			VkShaderModule vertModule = bvk::create::createShaderModule(readFile("vert_noproj.spv"));
 			VkShaderModule fragModule = bvk::create::createShaderModule(readFile("frag_blit.spv"));
 			shaderStages[0] = bvk::create::createShaderStage(vertModule, VK_SHADER_STAGE_VERTEX_BIT);
 			shaderStages[1] = bvk::create::createShaderStage(fragModule, VK_SHADER_STAGE_FRAGMENT_BIT);
+
+			blitPipelineInfo.stageCount = static_cast<uint32_t>(shaderStages.size());
+			blitPipelineInfo.pStages = shaderStages.data();
 
 			VkResult result = vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &blitPipelineInfo, nullptr, &pipelines.attachmentRead);
 			if (result != VK_SUCCESS) {
@@ -1384,6 +1417,8 @@ private:
 
 		vkFreeCommandBuffers(device, commandPool, static_cast<uint32_t>(commandBuffers.size()), commandBuffers.data());
 
+		vkDestroyPipeline(device, pipelines.skybox, nullptr);
+
 		vkDestroyPipeline(device, pipelines.attachmentWrite, nullptr);
 		vkDestroyPipelineLayout(device, pipelineLayouts.attachmentWrite, nullptr);
 
@@ -1445,6 +1480,7 @@ private:
 
 		destroyMeshBuffer(device, meshBuffer);
 		destroyMeshBuffer(device, blitMeshBuffer);
+		destroyMeshBuffer(device, skyboxBuffer);
 
 		for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
 			vkDestroySemaphore(device, renderFinishedSemaphores[i], nullptr);

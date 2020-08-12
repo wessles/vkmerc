@@ -6,3 +6,6 @@ C:\VulkanSDK\1.2.141.2\Bin32\glslc noproj.vert -o vert_noproj.spv
 
 C:\VulkanSDK\1.2.141.2\Bin32\glslc skybox.frag -o frag_skybox.spv
 C:\VulkanSDK\1.2.141.2\Bin32\glslc skybox.vert -o vert_skybox.spv
+
+C:\VulkanSDK\1.2.141.2\Bin32\glslc control.tesc -o control.spv
+C:\VulkanSDK\1.2.141.2\Bin32\glslc eval.tese -o eval.spv

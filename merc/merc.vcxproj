@@ -248,6 +248,8 @@
   <ItemGroup>
     <None Include="blit.frag" />
     <None Include="compile_shaders.bat" />
+    <None Include="control.tesc" />
+    <None Include="eval.tese" />
     <None Include="noproj.vert" />
     <None Include="shader.frag" />
     <None Include="shader.vert" />
@@ -257,6 +259,8 @@
   <ItemGroup>
     <ClInclude Include="FlyCam.h" />
     <ClInclude Include="Bvk.hpp" />
+    <ClInclude Include="nuklear-glfw-vulkan.h" />
+    <ClInclude Include="nuklear.h" />
     <ClInclude Include="stb_image.h" />
     <ClInclude Include="tiny_obj_loader.h" />
   </ItemGroup>
