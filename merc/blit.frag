@@ -2,6 +2,7 @@
 #extension GL_ARB_separate_shader_objects : enable
 
 layout(binding = 1) uniform sampler2D texSampler;
+layout(binding = 2) uniform sampler2D shadowTex;
 
 layout(location = 0) in vec2 fragTexCoord;
 
@@ -16,4 +17,8 @@ void main() {
 	outColor.g = texture(texSampler, fragTexCoord + go).g;
 	outColor.b = texture(texSampler, fragTexCoord + bo).b;
 	outColor.a = 1.0;
+
+// preview the shadow map
+//	float x = 0.5;
+//	outColor = vec4(vec3(max(0.0, texture(shadowTex, fragTexCoord).r - x) / (1.-x)), 1.0);
 }

@@ -50,6 +50,9 @@
     <None Include="control.tesc">
       <Filter>Source Files</Filter>
     </None>
+    <None Include="shadow.vert">
+      <Filter>Source Files</Filter>
+    </None>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="stb_image.h">

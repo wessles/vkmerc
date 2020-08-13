@@ -2,7 +2,7 @@
 #extension GL_ARB_separate_shader_objects : enable
 
 layout(binding = 0) uniform UniformBufferObject {
-	vec3 light;
+	mat4 light;
     mat4 model;
     mat4 view;
     mat4 proj;
@@ -19,10 +19,10 @@ layout(location = 2) out vec2 outTexCoord;
 layout(location = 3) out vec3 outNormal;
 
 void main() {
-    gl_Position = vec4(inPosition, 1.0);
+    gl_Position = ubo.proj * ubo.view * ubo.model * vec4(inPosition, 1.0);
 
-	outPosition = inPosition;
+	outPosition = (ubo.model * vec4(inPosition, 1.0)).xyz;
 	outColor = inColor;
 	outTexCoord = inTexCoord;
-	outNormal = inNormal;
+	outNormal = (ubo.model * vec4(inNormal, 0.0)).xyz;
 }

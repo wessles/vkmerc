@@ -18,7 +18,7 @@ struct PnPatch
 #define uTessAlpha 3./4.
 
 layout(binding = 0) uniform UniformBufferObject {
-	vec3 light;
+	mat4 light;
     mat4 model;
     mat4 view;
     mat4 proj;

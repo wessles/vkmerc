@@ -1,7 +1,7 @@
 #version 450
 
 layout(binding = 0) uniform UniformBufferObject {
-	vec3 light;
+	mat4 light;
     mat4 model;
     mat4 view;
     mat4 proj;

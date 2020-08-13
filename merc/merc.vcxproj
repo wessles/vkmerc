@@ -253,6 +253,7 @@
     <None Include="noproj.vert" />
     <None Include="shader.frag" />
     <None Include="shader.vert" />
+    <None Include="shadow.vert" />
     <None Include="skybox.frag" />
     <None Include="skybox.vert" />
   </ItemGroup>
