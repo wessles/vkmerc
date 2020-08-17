@@ -43,12 +43,13 @@ void FlyCam::update() {
 	if (a) accel.x -= thrust;
 	if (s) accel.z += thrust;
 	if (d) accel.x += thrust;
-	if (space) accel.y += thrust;
-	if (shift) accel.y -= thrust;
 
 	glm::mat4 transform = getTransform();
 	// orient acceleration to transform
 	accel = transform * accel;
+
+	if (space) accel.y += thrust;
+	if (shift) accel.y -= thrust;
 
 	velocity += accel;
 	velocity = glm::vec4(0.9f) * velocity;
@@ -96,9 +97,10 @@ glm::mat4 FlyCam::getTransform()
 	return transform;
 }
 
-glm::mat4 FlyCam::getProjMatrix(float width, float height)
+glm::mat4 FlyCam::getProjMatrix(float width, float height, float zMin, float zMax)
 {
-	glm::mat4 proj = glm::perspective(glm::radians(90.0f), width / height, 0.01f, 1000.0f);
+	glm::mat4 proj = glm::perspective(glm::radians(90.0f), width / height, zMin, zMax);
+	//proj = glm::ortho(-2.0f, 2.0f, -2.0f, 2.0f, -30.0f, 30.0f);
 	proj[1][1] *= -1;
 	return proj;
 }

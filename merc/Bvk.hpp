@@ -435,7 +435,103 @@ namespace bvk::create {
 	}
 }
 
+namespace bvk::buffer {
+
+	void copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size) {
+		VkCommandBuffer commandBuffer = bvk::create::beginSingleTimeCommands();
+
+		// copy region
+		VkBufferCopy copyRegion{};
+		copyRegion.srcOffset = 0; // Optional
+		copyRegion.dstOffset = 0; // Optional
+		copyRegion.size = size;
+		vkCmdCopyBuffer(commandBuffer, srcBuffer, dstBuffer, 1, &copyRegion);
+
+		bvk::create::endSingleTimeCommands(commandBuffer);
+	}
+	void createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, VkBuffer& buffer, VkDeviceMemory& bufferMemory) {
+		VkBufferCreateInfo bufferInfo{};
+		bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+		bufferInfo.size = size;
+		bufferInfo.usage = usage;
+		bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+		if (vkCreateBuffer(device, &bufferInfo, nullptr, &buffer) != VK_SUCCESS) {
+			throw std::runtime_error("Failed to create vertex buffer!");
+		}
+
+		// find memory type index that is suitable
+		VkMemoryRequirements memRequirements;
+		vkGetBufferMemoryRequirements(device, buffer, &memRequirements);
+
+		VkMemoryAllocateInfo allocInfo{};
+		allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+		allocInfo.allocationSize = memRequirements.size;
+		allocInfo.memoryTypeIndex = bvk::support::findSupportedMemoryType(memRequirements.memoryTypeBits, properties);
+
+		// allocate the memory
+		if (vkAllocateMemory(device, &allocInfo, nullptr, &bufferMemory) != VK_SUCCESS) {
+			throw std::runtime_error("Failed to allocate vertex buffer memory!");
+		}
+
+		// copy vertex data to newly allocated buffer
+		vkBindBufferMemory(device, buffer, bufferMemory, 0);
+	}
+	template <class Type>
+	void initDeviceLocalBuffer(std::vector<Type> &bufferData, VkBuffer &buffer, VkDeviceMemory &deviceMemory, VkBufferUsageFlagBits bufferUsageBit) {
+		VkDeviceSize bufferSize = sizeof(bufferData[0]) * bufferData.size();
+
+		VkBuffer stagingBuffer;
+		VkDeviceMemory stagingBufferMemory;
+		createBuffer(bufferSize,
+			VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+			stagingBuffer,
+			stagingBufferMemory);
+
+		void* data;
+		vkMapMemory(device, stagingBufferMemory, 0, bufferSize, 0, &data);
+		memcpy(data, bufferData.data(), (size_t)bufferSize);
+		vkUnmapMemory(device, stagingBufferMemory);
+
+		createBuffer(bufferSize,
+			VK_BUFFER_USAGE_TRANSFER_DST_BIT | bufferUsageBit,
+			VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+			buffer,
+			deviceMemory);
+
+		// copy staging buffer to vertex buffer
+		copyBuffer(stagingBuffer, buffer, bufferSize);
+
+		vkDestroyBuffer(device, stagingBuffer, nullptr);
+		vkFreeMemory(device, stagingBufferMemory, nullptr);
+	}
+}
+
+namespace bvk::mesh {
+	struct MeshBuffer {
+		VkBuffer vBuffer;
+		VkDeviceMemory vMemory;
+		VkBuffer iBuffer;
+		VkDeviceMemory iMemory;
+	};
+
+	void destroyMeshBuffer(const VkDevice& device, MeshBuffer& meshBuffer) {
+		vkDestroyBuffer(device, meshBuffer.vBuffer, nullptr);
+		vkDestroyBuffer(device, meshBuffer.iBuffer, nullptr);
+		vkFreeMemory(device, meshBuffer.vMemory, nullptr);
+		vkFreeMemory(device, meshBuffer.iMemory, nullptr);
+	}
+}
+
 namespace bvk::image {
+	struct Image {
+		VkImage image;
+		VkDeviceMemory imageMemory;
+		VkImageView imageView;
+		uint32_t mipLevels = 1;
+	};
+
 	void generateMipmaps(VkImage image, VkFormat imageFormat, int32_t texWidth, int32_t texHeight, uint32_t mipLevels) {
 		// check for linear blitting support
 		VkFormatProperties formatProperties;
@@ -663,49 +759,104 @@ namespace bvk::image {
 
 		bvk::create::endSingleTimeCommands(commandBuffer);
 	}
-}
+	void loadTexture(const std::string& path, Image& image) {
+		int texWidth, texHeight, texChannels;
+		stbi_uc* pixels = stbi_load(path.c_str(), &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
 
-namespace bvk::buffer {
+		if (!pixels) {
+			throw std::runtime_error("Failed to load texture image!");
+		}
 
-	void copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size) {
-		VkCommandBuffer commandBuffer = bvk::create::beginSingleTimeCommands();
+		image.mipLevels = static_cast<uint32_t>(std::floor(std::log2(std::max(texWidth, texHeight)))) + 1;
 
-		// copy region
-		VkBufferCopy copyRegion{};
-		copyRegion.srcOffset = 0; // Optional
-		copyRegion.dstOffset = 0; // Optional
-		copyRegion.size = size;
-		vkCmdCopyBuffer(commandBuffer, srcBuffer, dstBuffer, 1, &copyRegion);
+		VkDeviceSize imageSize = texWidth * texHeight * 4;
 
-		bvk::create::endSingleTimeCommands(commandBuffer);
+		VkBuffer stagingBuffer;
+		VkDeviceMemory stagingBufferMemory;
+		bvk::buffer::createBuffer(imageSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+			stagingBuffer, stagingBufferMemory);
+
+		void* data;
+		vkMapMemory(device, stagingBufferMemory, 0, imageSize, 0, &data);
+		memcpy(data, pixels, static_cast<size_t>(imageSize));
+		vkUnmapMemory(device, stagingBufferMemory);
+
+		stbi_image_free(pixels);
+
+		bvk::image::createImage(texWidth, texHeight, image.mipLevels, VK_SAMPLE_COUNT_1_BIT,
+			VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_TILING_OPTIMAL,
+			VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+			VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+			image.image, image.imageMemory);
+		// transition layout to transfer destination optimized type
+		bvk::image::transitionImageLayout(image.image, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, image.mipLevels);
+		// copy data to image
+		bvk::image::copyBufferToImage(stagingBuffer, image.image, static_cast<uint32_t>(texWidth), static_cast<uint32_t>(texHeight));
+		// transition layout to readonly shader data, and generate mip maps (even if it's just one)
+		bvk::image::generateMipmaps(image.image, VK_FORMAT_R8G8B8A8_SRGB, texWidth, texHeight, image.mipLevels);
+
+
+		vkDestroyBuffer(device, stagingBuffer, nullptr);
+		vkFreeMemory(device, stagingBufferMemory, nullptr);
 	}
-	void createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, VkBuffer& buffer, VkDeviceMemory& bufferMemory) {
-		VkBufferCreateInfo bufferInfo{};
-		bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-		bufferInfo.size = size;
-		bufferInfo.usage = usage;
-		bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+	void loadCubemap(const std::array<std::string, 6> &paths, Image& image) {
+		/*
+		negx, y, z
+		posx, y, z
+		*/
+		std::array<stbi_uc*, 6> faceData;
+		int texWidth, texHeight, texChannels;
 
-		if (vkCreateBuffer(device, &bufferInfo, nullptr, &buffer) != VK_SUCCESS) {
-			throw std::runtime_error("Failed to create vertex buffer!");
+		for (int i = 0; i < paths.size(); i++) {
+			faceData[i] = stbi_load(paths[i].c_str(), &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
+			if (!faceData[i]) {
+				throw std::runtime_error("Failed to load cubemap image '" + paths[i] + "'!");
+			}
 		}
 
-		// find memory type index that is suitable
-		VkMemoryRequirements memRequirements;
-		vkGetBufferMemoryRequirements(device, buffer, &memRequirements);
+		VkDeviceSize layerSize = texWidth * texHeight * 4;
+		VkDeviceSize imageSize = layerSize * paths.size();
 
-		VkMemoryAllocateInfo allocInfo{};
-		allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-		allocInfo.allocationSize = memRequirements.size;
-		allocInfo.memoryTypeIndex = bvk::support::findSupportedMemoryType(memRequirements.memoryTypeBits, properties);
+		VkBuffer stagingBuffer;
+		VkDeviceMemory stagingBufferMemory;
+		bvk::buffer::createBuffer(imageSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+			stagingBuffer, stagingBufferMemory);
 
-		// allocate the memory
-		if (vkAllocateMemory(device, &allocInfo, nullptr, &bufferMemory) != VK_SUCCESS) {
-			throw std::runtime_error("Failed to allocate vertex buffer memory!");
+		void* data;
+		vkMapMemory(device, stagingBufferMemory, 0, imageSize, 0, &data);
+		for (int i = 0; i < paths.size(); i++) {
+			memcpy(static_cast<char*>(data) + (layerSize * i), faceData[i], static_cast<size_t>(layerSize));
+		}
+		vkUnmapMemory(device, stagingBufferMemory);
+
+		for (int i = 0; i < paths.size(); i++) {
+			stbi_image_free(faceData[i]);
 		}
 
-		// copy vertex data to newly allocated buffer
-		vkBindBufferMemory(device, buffer, bufferMemory, 0);
+		bvk::image::createImage(texWidth, texHeight, image.mipLevels, VK_SAMPLE_COUNT_1_BIT,
+			VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_TILING_OPTIMAL,
+			VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+			VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+			image.image, image.imageMemory,
+			VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT, paths.size());
+		// transition layout to transfer destination optimized type
+		bvk::image::transitionImageLayout(image.image, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, image.mipLevels, paths.size());
+		// copy data to image
+		bvk::image::copyBufferToImage(stagingBuffer, image.image, static_cast<uint32_t>(texWidth), static_cast<uint32_t>(texHeight), paths.size());
+		// transition layout to readonly shader data, and generate mip maps (even if it's just one)
+		//bvk::image::generateMipmaps(image.image, VK_FORMAT_R8G8B8A8_SRGB, texWidth, texHeight, image.mipLevels);
+		bvk::image::transitionImageLayout(image.image, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, image.mipLevels, paths.size());
+
+		vkDestroyBuffer(device, stagingBuffer, nullptr);
+		vkFreeMemory(device, stagingBufferMemory, nullptr);
+
+	}
+	void destroyImage(const VkDevice& device, Image& image) {
+		vkDestroyImage(device, image.image, nullptr);
+		vkDestroyImageView(device, image.imageView, nullptr);
+		vkFreeMemory(device, image.imageMemory, nullptr);
 	}
 }
 
@@ -888,6 +1039,7 @@ namespace bvk {
 		deviceFeatures.sampleRateShading = VK_TRUE;
 		deviceFeatures.tessellationShader = VK_TRUE;
 		deviceFeatures.fillModeNonSolid = VK_TRUE;
+		deviceFeatures.wideLines = VK_TRUE;
 
 
 		VkDeviceCreateInfo createInfo{};

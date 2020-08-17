@@ -256,6 +256,8 @@
     <None Include="shadow.vert" />
     <None Include="skybox.frag" />
     <None Include="skybox.vert" />
+    <None Include="test.frag" />
+    <None Include="test.vert" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="FlyCam.h" />

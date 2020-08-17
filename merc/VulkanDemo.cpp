@@ -11,6 +11,7 @@
 #define GLM_FORCE_DEPTH_ZERO_TO_ONE // for overriding opengl defaults
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtx/string_cast.hpp>
 
 #define GLM_ENABLE_EXPERIMENTAL
 #include <glm/gtx/hash.hpp>
@@ -68,10 +69,17 @@ using bvk::imagesInFlight;
 using bvk::buffer::copyBuffer;
 using bvk::buffer::createBuffer;
 
+using bvk::image::Image;
+using bvk::image::destroyImage;
+
+using bvk::mesh::MeshBuffer;
+using bvk::mesh::destroyMeshBuffer;
+using bvk::buffer::initDeviceLocalBuffer;
+
 //////////////////////////////
 
 
-#define SHADOWMAP_DIM 1024
+#define SHADOWMAP_DIM 512
 
 
 static std::vector<char> readFile(const std::string& filename) {
@@ -178,10 +186,12 @@ namespace std {
 }
 
 struct UniformBufferObject {
-	alignas(16) glm::mat4 light;
-	alignas(16) glm::mat4 model;
-	alignas(16) glm::mat4 view;
-	alignas(16) glm::mat4 proj;
+	glm::mat4 light;
+	glm::mat4 model;
+	glm::mat4 view;
+	glm::mat4 proj;
+	glm::vec4 lightDir;
+	glm::mat4 testProj;
 };
 
 struct MinimalMeshData {
@@ -194,35 +204,6 @@ struct MeshData {
 	std::vector<Vertex> vertices;
 	std::vector<uint32_t> indices;
 };
-
-struct MeshBuffer {
-	VkBuffer vBuffer;
-	VkDeviceMemory vMemory;
-	VkBuffer iBuffer;
-	VkDeviceMemory iMemory;
-};
-
-void destroyMeshBuffer(const VkDevice& device, MeshBuffer& meshBuffer) {
-	vkDestroyBuffer(device, meshBuffer.vBuffer, nullptr);
-	vkDestroyBuffer(device, meshBuffer.iBuffer, nullptr);
-	vkFreeMemory(device, meshBuffer.vMemory, nullptr);
-	vkFreeMemory(device, meshBuffer.iMemory, nullptr);
-}
-
-struct Image {
-	VkImage image;
-	VkDeviceMemory imageMemory;
-	VkImageView imageView;
-	uint32_t mipLevels = 1;
-};
-
-void destroyImage(const VkDevice& device, Image& image) {
-	vkDestroyImage(device, image.image, nullptr);
-	vkDestroyImageView(device, image.imageView, nullptr);
-	vkFreeMemory(device, image.imageMemory, nullptr);
-}
-
-
 
 MeshData box = {
 	{
@@ -278,12 +259,11 @@ public:
 	}
 
 private:
-	const uint32_t WIDTH = 500;
-	const uint32_t HEIGHT = 500;
+	const uint32_t WIDTH = 1280;
+	const uint32_t HEIGHT = 720;
 
 	const std::string MODEL_PATH = "scene.obj";
 	const std::string TEXTURE_PATH = "viking_room.png";
-
 
 	Image depthImage;
 	Image colorImage;
@@ -300,6 +280,7 @@ private:
 		VkPipeline attachmentRead;
 		VkPipeline skybox;
 		VkPipeline tess;
+		VkPipeline testVert;
 	} pipelines;
 
 	struct {
@@ -729,6 +710,50 @@ private:
 			vkDestroyShaderModule(device, fragModule, nullptr);
 		}
 
+		// vertTest pipeline
+		{
+			VkGraphicsPipelineCreateInfo vertTestPipelineInfo = pipelineInfo;
+
+			vertTestPipelineInfo.renderPass = renderPass;
+			vertTestPipelineInfo.subpass = 0;
+			vertTestPipelineInfo.layout = pipelineLayouts.attachmentWrite;
+
+			//rasterizer.polygonMode = VK_POLYGON_MODE_LINE;
+			//rasterizer.cullMode = VK_CULL_MODE_NONE;
+			rasterizer.lineWidth = 3.0f;
+			//depthStencil.depthTestEnable = false;
+
+			// specify vertex attribute structure
+			auto bindingDescription = Vertex::getBindingDescription();
+			auto attributeDescriptions = Vertex::getAttributeDescriptions();
+			vertexInputInfo.vertexAttributeDescriptionCount = static_cast<uint32_t>(attributeDescriptions.size());
+			vertexInputInfo.pVertexBindingDescriptions = &bindingDescription; // Optional
+			vertexInputInfo.pVertexAttributeDescriptions = attributeDescriptions.data(); // Optional
+
+			std::array<VkPipelineShaderStageCreateInfo, 2> shaderStages{};
+
+			// specify shaders
+			VkShaderModule vertModule = bvk::create::createShaderModule(readFile("test_vert.spv"));
+			VkShaderModule fragModule = bvk::create::createShaderModule(readFile("test_frag.spv"));
+			shaderStages[0] = bvk::create::createShaderStage(vertModule, VK_SHADER_STAGE_VERTEX_BIT);
+			shaderStages[1] = bvk::create::createShaderStage(fragModule, VK_SHADER_STAGE_FRAGMENT_BIT);
+
+			vertTestPipelineInfo.stageCount = static_cast<uint32_t>(shaderStages.size());
+			vertTestPipelineInfo.pStages = shaderStages.data();
+
+			VkResult result = vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &vertTestPipelineInfo, nullptr, &pipelines.testVert);
+			if (result != VK_SUCCESS) {
+				throw std::runtime_error("Failed to create graphics pipeline!");
+			}
+
+			vkDestroyShaderModule(device, vertModule, nullptr);
+			vkDestroyShaderModule(device, fragModule, nullptr);
+
+			rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
+			rasterizer.cullMode = VK_CULL_MODE_BACK_BIT;
+			depthStencil.depthTestEnable = true;
+		}
+
 		// Tess pipeline begins
 		{
 			VkGraphicsPipelineCreateInfo tessPipelineInfo = pipelineInfo;
@@ -1005,8 +1030,10 @@ private:
 		}
 
 		VkSamplerCreateInfo sampler = bvk::create::createSamplerCI();
-		sampler.magFilter = VK_FILTER_LINEAR;
-		sampler.minFilter = VK_FILTER_LINEAR;
+		sampler.magFilter = VK_FILTER_NEAREST;
+		sampler.minFilter = VK_FILTER_NEAREST;
+		sampler.anisotropyEnable = VK_FALSE;
+
 		vkCreateSampler(device, &sampler, nullptr, &offscreenPass.depthSampler);
 	}
 
@@ -1034,102 +1061,6 @@ private:
 		}
 	}
 
-	void loadTexture(const std::string& path, Image& image) {
-		int texWidth, texHeight, texChannels;
-		stbi_uc* pixels = stbi_load(path.c_str(), &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
-
-		if (!pixels) {
-			throw std::runtime_error("Failed to load texture image!");
-		}
-
-		image.mipLevels = static_cast<uint32_t>(std::floor(std::log2(std::max(texWidth, texHeight)))) + 1;
-
-		VkDeviceSize imageSize = texWidth * texHeight * 4;
-
-		VkBuffer stagingBuffer;
-		VkDeviceMemory stagingBufferMemory;
-		createBuffer(imageSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-			stagingBuffer, stagingBufferMemory);
-
-		void* data;
-		vkMapMemory(device, stagingBufferMemory, 0, imageSize, 0, &data);
-		memcpy(data, pixels, static_cast<size_t>(imageSize));
-		vkUnmapMemory(device, stagingBufferMemory);
-
-		stbi_image_free(pixels);
-
-		bvk::image::createImage(texWidth, texHeight, image.mipLevels, VK_SAMPLE_COUNT_1_BIT,
-			VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_TILING_OPTIMAL,
-			VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
-			VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-			image.image, image.imageMemory);
-		// transition layout to transfer destination optimized type
-		bvk::image::transitionImageLayout(image.image, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, image.mipLevels);
-		// copy data to image
-		bvk::image::copyBufferToImage(stagingBuffer, image.image, static_cast<uint32_t>(texWidth), static_cast<uint32_t>(texHeight));
-		// transition layout to readonly shader data, and generate mip maps (even if it's just one)
-		bvk::image::generateMipmaps(image.image, VK_FORMAT_R8G8B8A8_SRGB, texWidth, texHeight, image.mipLevels);
-
-
-		vkDestroyBuffer(device, stagingBuffer, nullptr);
-		vkFreeMemory(device, stagingBufferMemory, nullptr);
-	}
-
-	/*
-	negx, y, z
-	posx, y, z
-	*/
-	void loadCubemap(const std::array<std::string, 6> &paths, Image& image) {
-		std::array<stbi_uc*, 6> faceData;
-		int texWidth, texHeight, texChannels;
-
-		for (int i = 0; i < paths.size(); i++) {
-			faceData[i] = stbi_load(paths[i].c_str(), &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
-			if (!faceData[i]) {
-				throw std::runtime_error("Failed to load cubemap image '" + paths[i] + "'!");
-			}
-		}
-
-		VkDeviceSize layerSize = texWidth * texHeight * 4;
-		VkDeviceSize imageSize = layerSize * paths.size();
-
-		VkBuffer stagingBuffer;
-		VkDeviceMemory stagingBufferMemory;
-		createBuffer(imageSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-			stagingBuffer, stagingBufferMemory);
-
-		void* data;
-		vkMapMemory(device, stagingBufferMemory, 0, imageSize, 0, &data);
-		for (int i = 0; i < paths.size(); i++) {
-			memcpy(static_cast<char*>(data) + (layerSize * i), faceData[i], static_cast<size_t>(layerSize));
-		}
-		vkUnmapMemory(device, stagingBufferMemory);
-
-		for (int i = 0; i < paths.size(); i++) {
-			stbi_image_free(faceData[i]);
-		}
-
-		bvk::image::createImage(texWidth, texHeight, image.mipLevels, VK_SAMPLE_COUNT_1_BIT,
-			VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_TILING_OPTIMAL,
-			VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
-			VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-			image.image, image.imageMemory,
-			VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT, paths.size());
-		// transition layout to transfer destination optimized type
-		bvk::image::transitionImageLayout(image.image, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, image.mipLevels, paths.size());
-		// copy data to image
-		bvk::image::copyBufferToImage(stagingBuffer, image.image, static_cast<uint32_t>(texWidth), static_cast<uint32_t>(texHeight), paths.size());
-		// transition layout to readonly shader data, and generate mip maps (even if it's just one)
-		//bvk::image::generateMipmaps(image.image, VK_FORMAT_R8G8B8A8_SRGB, texWidth, texHeight, image.mipLevels);
-		bvk::image::transitionImageLayout(image.image, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, image.mipLevels, paths.size());
-
-		vkDestroyBuffer(device, stagingBuffer, nullptr);
-		vkFreeMemory(device, stagingBufferMemory, nullptr);
-
-	}
-
 	void createTextureImage() {
 		// regular texture
 		loadTexture(TEXTURE_PATH, textureImage);
@@ -1151,7 +1082,6 @@ private:
 			"res/cubemap/negz.jpg",
 		}, cubeMap);
 		cubeMap.imageView = createImageView(cubeMap.image, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_ASPECT_COLOR_BIT, cubeMap.mipLevels, VK_IMAGE_VIEW_TYPE_CUBE, 6);
-
 		VkSamplerCreateInfo samplerCI = bvk::create::createSamplerCI();
 		samplerCI.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
 		samplerCI.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
@@ -1205,37 +1135,6 @@ private:
 		}
 	}
 
-	// automatically write vertex or index buffer to device local memory using staging buffer
-	template <class Type>
-	void initDeviceLocalBuffer(std::vector<Type> &vertices, VkBuffer &vBuffer, VkDeviceMemory &vbMemory, VkBufferUsageFlagBits bufferUsageBit) {
-		VkDeviceSize bufferSize = sizeof(vertices[0]) * vertices.size();
-
-		VkBuffer stagingBuffer;
-		VkDeviceMemory stagingBufferMemory;
-		createBuffer(bufferSize,
-			VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-			stagingBuffer,
-			stagingBufferMemory);
-
-		void* data;
-		vkMapMemory(device, stagingBufferMemory, 0, bufferSize, 0, &data);
-		memcpy(data, vertices.data(), (size_t)bufferSize);
-		vkUnmapMemory(device, stagingBufferMemory);
-
-		createBuffer(bufferSize,
-			VK_BUFFER_USAGE_TRANSFER_DST_BIT | bufferUsageBit,
-			VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-			vBuffer,
-			vbMemory);
-
-		// copy staging buffer to vertex buffer
-		copyBuffer(stagingBuffer, vBuffer, bufferSize);
-
-		vkDestroyBuffer(device, stagingBuffer, nullptr);
-		vkFreeMemory(device, stagingBufferMemory, nullptr);
-	}
-
 	void createVertexBuffer() {
 		initDeviceLocalBuffer<Vertex>(mesh.vertices, meshBuffer.vBuffer, meshBuffer.vMemory, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
 		initDeviceLocalBuffer<MinimalVertex>(blit.vertices, blitMeshBuffer.vBuffer, blitMeshBuffer.vMemory, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
@@ -1251,6 +1150,103 @@ private:
 		initDeviceLocalBuffer<uint32_t>(box.indices, skyboxBuffer.iBuffer, skyboxBuffer.iMemory, VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
 	}
 
+	glm::mat4 fitLightProjMatToCameraFrustum(glm::mat4 frustumMat, glm::vec4 lightDirection) {
+		// multiply by inverse projection*view matrix to find frustum vertices in world space
+		// transform to light space
+		// same pass, find minimum along each axis
+		glm::mat4 lightSpaceTransform = glm::lookAt(glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(lightDirection), glm::vec3(0.0f, 1.0f, 0.0f));
+
+		bool firstProcessed = false;
+		glm::vec3 boundingA { 0.0f, 0.0f, 0.0f };
+		glm::vec3 boundingB { 0.0f, 0.0f, 0.0f };
+
+
+		// start with <-1 -1 0> to <1 1 1> cube
+		// notice we use z:[0, 1] clip space, unlike openGL's z:[-1, 1]
+		std::vector<glm::vec4> frustumVertices = {
+			{-1.0f,	-1.0f,	-1.0f,	1.0f},
+			{-1.0f,	-1.0f,	1.0f,	1.0f},
+			{-1.0f,	1.0f,	-1.0f,	1.0f},
+			{-1.0f,	1.0f,	1.0f,	1.0f},
+			{1.0f,	-1.0f,	-1.0f,	1.0f},
+			{1.0f,	-1.0f,	1.0f,	1.0f},
+			{1.0f,	1.0f,	-1.0f,	1.0f},
+			{1.0f,	1.0f,	1.0f,	1.0f}
+		};
+		for (glm::vec4 vert : frustumVertices) {
+			// clip space -> world space -> light space
+			vert.z = (vert.z + 1.0f) / 2.0f;
+			vert = frustumMat * vert;
+			vert /= vert.w;
+			vert = lightSpaceTransform * vert;
+
+			// initialize bounds without comparison, only for first transformed vertex
+			if (!firstProcessed) {
+				boundingA = glm::vec3(vert);
+				boundingB = glm::vec3(vert);
+				firstProcessed = true;
+				continue;
+			}
+
+			// expand bounding box to encompass everything in 3D
+			boundingA.x = std::min(vert.x, boundingA.x);
+			boundingB.x = std::max(vert.x, boundingB.x);
+			boundingA.y = std::min(vert.y, boundingA.y);
+			boundingB.y = std::max(vert.y, boundingB.y);
+			boundingA.z = std::min(vert.z, boundingA.z);
+			boundingB.z = std::max(vert.z, boundingB.z);
+		}
+
+		// from https://en.wikipedia.org/wiki/Orthographic_projection#Geometry
+		// because I don't trust GLM
+		float l = boundingA.x;
+		float r = boundingB.x;
+		float b = boundingA.y;
+		float t = boundingB.y;
+		float n = boundingA.z;
+		float f = boundingB.z;
+
+		// keep constant world-size square
+		float constantSize = glm::length(frustumVertices[7] - frustumVertices[0]);
+
+		// make it square, with side length of max(r-l,t-b)
+
+		float W = r - l, H = t - b;
+		float diff = constantSize - H;
+		t += diff / 2.0f;
+		b -= diff / 2.0f;
+		
+		diff = constantSize - W;
+		r += diff / 2.0f;
+		l -= diff / 2.0f;
+
+		// avoid shimmering
+		float pixelSize = constantSize / SHADOWMAP_DIM;
+		l = std::round(l/pixelSize) * pixelSize;
+		r = std::round(r/pixelSize) * pixelSize;
+		b = std::round(b/pixelSize) * pixelSize;
+		t = std::round(t/pixelSize) * pixelSize;
+
+		glm::mat4 ortho = {
+			2.0f / (r-l),	0.0f,			0.0f,			0.0f,
+			0.0f,			2.0f / (t-b),	0.0f,			0.0f,
+			0.0f,			0.0f,			2.0f / (f-n),	0.0f,
+			-(r+l)/(r-l),	-(t+b)/(t-b),	-(f+n)/(f-n),	1.0f
+		};
+		// project in light space -> world space
+		ortho = ortho * lightSpaceTransform;
+		ortho = glm::mat4{
+			1,0,0,0,
+			0,-1,0,0,
+			0,0,.5f,0,
+			0,0,.5f,1
+		} * ortho;
+
+		return  ortho;
+	}
+
+	bool testSwitch = false;
+
 	void updateUniformBuffer(uint32_t currentImage) {
 		static auto startTime = std::chrono::high_resolution_clock::now();
 
@@ -1260,12 +1256,23 @@ private:
 		camera.update();
 
 		UniformBufferObject ubo{};
-		float x = 5.0;
-		ubo.light = glm::perspective(glm::radians(30.0f), 1.0f, 1.0f, 30.0f) * (glm::lookAt(glm::vec3(10.0, 10.0, 10.0), glm::vec3(0.0), glm::vec3(0.0, 1.0, 0.0)));
-		//ubo.light[1][1] *= -1;
 		ubo.model = glm::rotate(glm::mat4(1.0f), glm::radians(-90.0f), glm::vec3(1.0, 0.0, 0.0));
 		ubo.view = glm::inverse(camera.getTransform());
-		ubo.proj = camera.getProjMatrix((float)swapChainExtent.width, (float)swapChainExtent.height);
+		ubo.proj = camera.getProjMatrix((float)swapChainExtent.width, (float)swapChainExtent.height, 0.01f, 2.0f);
+
+
+		//ubo.testProj = glm::inverse(glm::scale(glm::vec3(1.0, 2.0, 1.0)) * glm::translate(glm::vec3(0.0f, -5.0f, 1.0f)) * glm::rotate(glm::mat4(1.0f), glm::radians(time * 10.0f), glm::vec3(0.0, 1.0, 1.0)));
+		ubo.testProj = glm::inverse(ubo.proj * ubo.view);
+		ubo.lightDir = glm::rotate(glm::mat4(1.0f), glm::radians(/*time **/ 20.0f), glm::vec3(0.0f, 1.0f, 0.0f)) * glm::vec4(0.0f, -1.0f, 1.0f, 0.0f);
+		ubo.lightDir = -glm::normalize(ubo.lightDir);
+		ubo.light = fitLightProjMatToCameraFrustum(ubo.testProj, ubo.lightDir);
+
+		if (glfwGetKey(bvk::window::window, GLFW_KEY_X) == GLFW_PRESS)
+			testSwitch = !testSwitch;
+
+		if (testSwitch) {
+			ubo.testProj = glm::inverse(ubo.light);
+		}
 
 		void* data;
 		vkMapMemory(device, uniformBuffersMemory[currentImage], 0, sizeof(ubo), 0, &data);
@@ -1377,6 +1384,11 @@ private:
 					vkCmdBindIndexBuffer(commandBuffers[i], meshBuffer.iBuffer, 0, VK_INDEX_TYPE_UINT32);
 
 					vkCmdDrawIndexed(commandBuffers[i], static_cast<uint32_t>(mesh.indices.size()), 1, 0, 0, 0);
+
+					//vkCmdBindPipeline(commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines.testVert);
+					//vkCmdBindVertexBuffers(commandBuffers[i], 0, 1, skyboxVBuffers, offsets);
+					//vkCmdBindIndexBuffer(commandBuffers[i], skyboxBuffer.iBuffer, 0, VK_INDEX_TYPE_UINT32);
+					//vkCmdDrawIndexed(commandBuffers[i], static_cast<uint32_t>(box.indices.size()), 1, 0, 0, 0);
 				}
 
 				// post fx

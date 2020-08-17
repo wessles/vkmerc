@@ -21,6 +21,6 @@ public:
 	FlyCam(GLFWwindow*);
 	void update();
 	glm::mat4 getTransform();
-	glm::mat4 getProjMatrix(float width, float height);
+	glm::mat4 getProjMatrix(float width, float height, float zMin = 0.01f, float zMax = 20.0f);
 };
 
