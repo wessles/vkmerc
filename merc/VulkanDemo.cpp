@@ -79,7 +79,7 @@ using bvk::buffer::initDeviceLocalBuffer;
 //////////////////////////////
 
 
-#define SHADOWMAP_DIM 512
+#define SHADOWMAP_DIM 1024
 
 
 static std::vector<char> readFile(const std::string& filename) {
@@ -708,6 +708,7 @@ private:
 
 			vkDestroyShaderModule(device, vertModule, nullptr);
 			vkDestroyShaderModule(device, fragModule, nullptr);
+
 		}
 
 		// vertTest pipeline
@@ -907,16 +908,25 @@ private:
 			depthPipelineInfo.stageCount = static_cast<uint32_t>(shaderStages.size());
 			depthPipelineInfo.pStages = shaderStages.data();
 
-			rasterizer.cullMode = VK_CULL_MODE_FRONT_BIT;
 			depthStencil.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
 
 			// no colors!
 			colorBlending.attachmentCount = 0;
 
+			rasterizer.depthBiasEnable = VK_TRUE;
+			rasterizer.depthBiasConstantFactor = 0.0f;
+			rasterizer.depthBiasSlopeFactor = 0.0f;
+			rasterizer.cullMode = VK_CULL_MODE_BACK_BIT;
+
 			VkResult result = vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &depthPipelineInfo, nullptr, &depthOnlyPipeline);
 			if (result != VK_SUCCESS) {
 				throw std::runtime_error("Failed to create graphics pipeline!");
 			}
+
+			rasterizer.depthBiasEnable = VK_FALSE;
+			rasterizer.depthBiasConstantFactor = 0.0f; // Optional
+			rasterizer.depthBiasClamp = 0.0f; // Optional
+			rasterizer.depthBiasSlopeFactor = 0.0f; // Optional
 
 			vkDestroyShaderModule(device, vertModule, nullptr);
 		}
@@ -1030,8 +1040,13 @@ private:
 		}
 
 		VkSamplerCreateInfo sampler = bvk::create::createSamplerCI();
-		sampler.magFilter = VK_FILTER_NEAREST;
-		sampler.minFilter = VK_FILTER_NEAREST;
+		sampler.magFilter = VK_FILTER_LINEAR;
+		sampler.minFilter = VK_FILTER_LINEAR;
+		//sampler.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
+		//sampler.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
+		//sampler.borderColor = VK_BORDER_COLOR_INT_OPAQUE_BLACK;
+		sampler.compareEnable = VK_TRUE;
+		sampler.compareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
 		sampler.anisotropyEnable = VK_FALSE;
 
 		vkCreateSampler(device, &sampler, nullptr, &offscreenPass.depthSampler);
@@ -1157,13 +1172,13 @@ private:
 		glm::mat4 lightSpaceTransform = glm::lookAt(glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(lightDirection), glm::vec3(0.0f, 1.0f, 0.0f));
 
 		bool firstProcessed = false;
-		glm::vec3 boundingA { 0.0f, 0.0f, 0.0f };
-		glm::vec3 boundingB { 0.0f, 0.0f, 0.0f };
+		glm::vec3 boundingA{ 0.0f, 0.0f, 0.0f };
+		glm::vec3 boundingB{ 0.0f, 0.0f, 0.0f };
 
 
 		// start with <-1 -1 0> to <1 1 1> cube
 		// notice we use z:[0, 1] clip space, unlike openGL's z:[-1, 1]
-		std::vector<glm::vec4> frustumVertices = {
+		std::vector<glm::vec4> boundingVertices = {
 			{-1.0f,	-1.0f,	-1.0f,	1.0f},
 			{-1.0f,	-1.0f,	1.0f,	1.0f},
 			{-1.0f,	1.0f,	-1.0f,	1.0f},
@@ -1173,11 +1188,15 @@ private:
 			{1.0f,	1.0f,	-1.0f,	1.0f},
 			{1.0f,	1.0f,	1.0f,	1.0f}
 		};
-		for (glm::vec4 vert : frustumVertices) {
-			// clip space -> world space -> light space
+		for (glm::vec4 &vert : boundingVertices) {
+			// clip space -> world space
 			vert.z = (vert.z + 1.0f) / 2.0f;
 			vert = frustumMat * vert;
 			vert /= vert.w;
+		}
+		
+		for (glm::vec4 vert : boundingVertices) {
+			// clip space -> world space -> light space
 			vert = lightSpaceTransform * vert;
 
 			// initialize bounds without comparison, only for first transformed vertex
@@ -1197,6 +1216,10 @@ private:
 			boundingB.z = std::max(vert.z, boundingB.z);
 		}
 
+		// scene bounding box constraint (simplified, expand on with proper scene graph later)
+		boundingA.y = std::min(-0.1f, boundingA.y);
+		boundingB.y = std::max(1.0f, boundingB.y);
+
 		// from https://en.wikipedia.org/wiki/Orthographic_projection#Geometry
 		// because I don't trust GLM
 		float l = boundingA.x;
@@ -1206,8 +1229,12 @@ private:
 		float n = boundingA.z;
 		float f = boundingB.z;
 
-		// keep constant world-size square
-		float constantSize = glm::length(frustumVertices[7] - frustumVertices[0]);
+		//REMOVE THIS
+		n = -10;
+		f = 10;
+
+		// keep constant world-size square, side length = diagonal of largest face of frustum
+		float constantSize = glm::length(glm::vec3(boundingVertices[7]) - glm::vec3(boundingVertices[0])) * 2.0;
 
 		// make it square, with side length of max(r-l,t-b)
 
@@ -1233,19 +1260,21 @@ private:
 			0.0f,			0.0f,			2.0f / (f-n),	0.0f,
 			-(r+l)/(r-l),	-(t+b)/(t-b),	-(f+n)/(f-n),	1.0f
 		};
-		// project in light space -> world space
-		ortho = ortho * lightSpaceTransform;
 		ortho = glm::mat4{
 			1,0,0,0,
 			0,-1,0,0,
 			0,0,.5f,0,
 			0,0,.5f,1
-		} * ortho;
+		} *ortho;
+		// project in light space -> world space
+		ortho = ortho * lightSpaceTransform;
 
 		return  ortho;
 	}
 
 	bool testSwitch = false;
+
+	glm::mat4 testMat;
 
 	void updateUniformBuffer(uint32_t currentImage) {
 		static auto startTime = std::chrono::high_resolution_clock::now();
@@ -1258,21 +1287,25 @@ private:
 		UniformBufferObject ubo{};
 		ubo.model = glm::rotate(glm::mat4(1.0f), glm::radians(-90.0f), glm::vec3(1.0, 0.0, 0.0));
 		ubo.view = glm::inverse(camera.getTransform());
-		ubo.proj = camera.getProjMatrix((float)swapChainExtent.width, (float)swapChainExtent.height, 0.01f, 2.0f);
+		ubo.proj = camera.getProjMatrix((float)swapChainExtent.width, (float)swapChainExtent.height, 0.01f, 10.0f);
 
 
 		//ubo.testProj = glm::inverse(glm::scale(glm::vec3(1.0, 2.0, 1.0)) * glm::translate(glm::vec3(0.0f, -5.0f, 1.0f)) * glm::rotate(glm::mat4(1.0f), glm::radians(time * 10.0f), glm::vec3(0.0, 1.0, 1.0)));
-		ubo.testProj = glm::inverse(ubo.proj * ubo.view);
-		ubo.lightDir = glm::rotate(glm::mat4(1.0f), glm::radians(/*time **/ 20.0f), glm::vec3(0.0f, 1.0f, 0.0f)) * glm::vec4(0.0f, -1.0f, 1.0f, 0.0f);
+		ubo.testProj = glm::inverse(camera.getProjMatrix((float)swapChainExtent.width, (float)swapChainExtent.height, 0.01f, .5f) * ubo.view);
+		ubo.lightDir = glm::rotate(glm::mat4(1.0f), glm::radians(20.0f), glm::vec3(0.0f, 1.0f, 0.0f)) * glm::vec4(0.0f, -1.0f, 1.0f, 0.0f);
 		ubo.lightDir = -glm::normalize(ubo.lightDir);
 		ubo.light = fitLightProjMatToCameraFrustum(ubo.testProj, ubo.lightDir);
 
-		if (glfwGetKey(bvk::window::window, GLFW_KEY_X) == GLFW_PRESS)
-			testSwitch = !testSwitch;
 
-		if (testSwitch) {
-			ubo.testProj = glm::inverse(ubo.light);
-		}
+		//if (glfwGetKey(bvk::window::window, GLFW_KEY_C) == GLFW_PRESS)
+		//	testMat = glm::inverse(camera.getProjMatrix((float)swapChainExtent.width, (float)swapChainExtent.height, 0.01f, 2.0f));
+
+		//if (glfwGetKey(bvk::window::window, GLFW_KEY_X) == GLFW_PRESS)
+		//	testSwitch = !testSwitch;
+
+		//if (testSwitch) {
+		//	ubo.testProj = glm::inverse(ubo.light);
+		//}
 
 		void* data;
 		vkMapMemory(device, uniformBuffersMemory[currentImage], 0, sizeof(ubo), 0, &data);
