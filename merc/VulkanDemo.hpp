@@ -1,11 +1,8 @@
+#ifndef _VULKANDEMO_HPP_
+#define _VULKANDEMO_HPP_
+
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
-
-#define STB_IMAGE_IMPLEMENTATION
-#include "stb_image.h"
-
-#define TINYOBJLOADER_IMPLEMENTATION
-#include "tiny_obj_loader.h"
 
 #define GLM_FORCE_RADIANS
 #define GLM_FORCE_DEPTH_ZERO_TO_ONE // for overriding opengl defaults
@@ -16,12 +13,6 @@
 #define GLM_ENABLE_EXPERIMENTAL
 #include <glm/gtx/hash.hpp>
 #include <glm/gtx/rotate_vector.hpp>
-
-#include <thread>
-
-#include "FlyCam.h"
-
-#include <chrono>
 
 #include <iostream>
 #include <stdexcept>
@@ -34,47 +25,18 @@
 #include <fstream>
 #include <array>
 #include <unordered_map>
+#include <thread>
+#include <chrono>
 
+#include "FlyCam.h"
 #include "Bvk.hpp"
 
 ////////////////////////////
 
-using bvk::device;
-using bvk::physicalDevice;
-using bvk::surface;
-using bvk::QueueFamilyIndices;
-using bvk::SwapChainSupportDetails;
-using bvk::msaaSamples;
-using bvk::support::findQueueFamiliesSupported;
-using bvk::graphicsQueue;
-using bvk::presentQueue;
-
-using bvk::swapChain;
-using bvk::swapChainImages;
-using bvk::swapChainImageFormat;
-using bvk::swapChainExtent;
-using bvk::swapChainImageViews;
-
-using bvk::createImageView;
-
-using bvk::commandPool;
-using bvk::descriptorPool;
-
-using bvk::MAX_FRAMES_IN_FLIGHT;
-using bvk::imageAvailableSemaphores;
-using bvk::renderFinishedSemaphores;
-using bvk::inFlightFences;
-using bvk::imagesInFlight;
-
-using bvk::buffer::copyBuffer;
-using bvk::buffer::createBuffer;
-
-using bvk::image::Image;
-using bvk::image::destroyImage;
-
-using bvk::mesh::MeshBuffer;
-using bvk::mesh::destroyMeshBuffer;
-using bvk::buffer::initDeviceLocalBuffer;
+using namespace bvk;
+using namespace bvk::image;
+using namespace bvk::mesh;
+using namespace bvk::buffer;
 
 //////////////////////////////
 
@@ -199,7 +161,6 @@ struct MinimalMeshData {
 	std::vector<uint32_t> indices;
 };
 
-
 struct MeshData {
 	std::vector<Vertex> vertices;
 	std::vector<uint32_t> indices;
@@ -241,6 +202,11 @@ MinimalMeshData blit = {
 	{0, 2, 1, 1, 2, 3}
 };
 
+struct Framebuffer {
+	int32_t width, height;
+	VkFramebuffer framebuffer;
+	Image image;
+};
 
 ///////////
 
@@ -265,15 +231,18 @@ private:
 	const std::string MODEL_PATH = "scene.obj";
 	const std::string TEXTURE_PATH = "viking_room.png";
 
+	Framebuffer shadowFB;
+	VkRenderPass shadowPass;
+	VkPipeline depthOnlyPipeline;
+
+	VkRenderPass renderPass;
+
 	Image depthImage;
 	Image colorImage;
 	Image postImage;
-	VkSampler postImageSampler;
 
 	Image cubeMap;
-	VkSampler cubeMapSampler;
-
-	VkRenderPass renderPass;
+	Image textureImage;
 
 	struct {
 		VkPipeline attachmentWrite;
@@ -298,24 +267,11 @@ private:
 		VkPipelineLayout attachmentRead;
 	} pipelineLayouts;
 
-	struct OffscreenPass {
-		int32_t width, height;
-		VkFramebuffer frameBuffer;
-		Image depth;
-		VkRenderPass renderPass;
-		VkSampler depthSampler;
-		VkDescriptorImageInfo descriptor;
-	} offscreenPass;
-	VkPipeline depthOnlyPipeline;
-
 	std::vector<VkFramebuffer> swapChainFramebuffers;
-
 	std::vector<VkCommandBuffer> commandBuffers;
 
 	size_t currentFrame = 0;
 
-	Image textureImage;
-	VkSampler textureSampler;
 
 	MeshData mesh;
 	MeshBuffer meshBuffer;
@@ -412,7 +368,7 @@ private:
 			attachments[3].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 			attachments[3].finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
 			VkAttachmentReference postAttachmentRef{ 3, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL };
-
+			VK
 			std::array<VkSubpassDescription, 2> subpasses{};
 
 			// first subpass - fill color and depth attachments / resolve MSAA
@@ -884,7 +840,7 @@ private:
 		{
 			VkGraphicsPipelineCreateInfo depthPipelineInfo = pipelineInfo;
 
-			depthPipelineInfo.renderPass = offscreenPass.renderPass;
+			depthPipelineInfo.renderPass = shadowPass;
 			depthPipelineInfo.subpass = 0;
 			depthPipelineInfo.layout = pipelineLayouts.attachmentWrite;
 			multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
@@ -938,9 +894,9 @@ private:
 		for (size_t i = 0; i < swapChainImageViews.size(); i++) {
 			// main pass framebuffer
 			std::array<VkImageView, 4> attachments = {
-				colorImage.imageView,
-				depthImage.imageView,
-				postImage.imageView,
+				colorImage.view,
+				depthImage.view,
+				postImage.view,
 				swapChainImageViews[i]
 			};
 
@@ -1006,7 +962,7 @@ private:
 		renderPassCreateInfo.dependencyCount = static_cast<uint32_t>(dependencies.size());
 		renderPassCreateInfo.pDependencies = dependencies.data();
 
-		if (vkCreateRenderPass(device, &renderPassCreateInfo, nullptr, &offscreenPass.renderPass) != VK_SUCCESS)
+		if (vkCreateRenderPass(device, &renderPassCreateInfo, nullptr, &shadowPass) != VK_SUCCESS)
 			throw std::runtime_error("Failed to create render pass.");
 	}
 
@@ -1018,23 +974,23 @@ private:
 			VK_IMAGE_TILING_OPTIMAL,
 			VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
 			VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-			offscreenPass.depth.image, offscreenPass.depth.imageMemory);
-		offscreenPass.depth.imageView = createImageView(offscreenPass.depth.image, depthFormat, VK_IMAGE_ASPECT_DEPTH_BIT, 1);
-		bvk::image::transitionImageLayout(offscreenPass.depth.image, depthFormat, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, 1);
+			shadowFB.image.handle, shadowFB.image.memory);
+		shadowFB.image.view = createImageView(shadowFB.image.handle, depthFormat, VK_IMAGE_ASPECT_DEPTH_BIT, 1);
+		bvk::image::transitionImageLayout(shadowFB.image.handle, depthFormat, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, 1);
 
 		makeOffscreenRenderpass();
 
 		// Create frame buffer
 		VkFramebufferCreateInfo framebufferInfo{};
 		framebufferInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
-		framebufferInfo.renderPass = offscreenPass.renderPass;
+		framebufferInfo.renderPass = shadowPass;
 		framebufferInfo.attachmentCount = 1;
-		framebufferInfo.pAttachments = &offscreenPass.depth.imageView;
+		framebufferInfo.pAttachments = &shadowFB.image.view;
 		framebufferInfo.width = SHADOWMAP_DIM;
 		framebufferInfo.height = SHADOWMAP_DIM;
 		framebufferInfo.layers = 1;
 
-		VkResult result = vkCreateFramebuffer(device, &framebufferInfo, nullptr, &offscreenPass.frameBuffer);
+		VkResult result = vkCreateFramebuffer(device, &framebufferInfo, nullptr, &shadowFB.framebuffer);
 		if (result != VK_SUCCESS) {
 			throw std::runtime_error("Failed to create offscreen framebuffer.");
 		}
@@ -1049,29 +1005,29 @@ private:
 		sampler.compareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
 		sampler.anisotropyEnable = VK_FALSE;
 
-		vkCreateSampler(device, &sampler, nullptr, &offscreenPass.depthSampler);
+		vkCreateSampler(device, &sampler, nullptr, &shadowFB.image.sampler);
 	}
 
 	void createImages() {
 		// color image
 		VkFormat colorFormat = swapChainImageFormat;
-		bvk::image::createImage(swapChainExtent.width, swapChainExtent.height, 1, msaaSamples, colorFormat, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, colorImage.image, colorImage.imageMemory);
-		colorImage.imageView = createImageView(colorImage.image, colorFormat, VK_IMAGE_ASPECT_COLOR_BIT, 1);
+		bvk::image::createImage(swapChainExtent.width, swapChainExtent.height, 1, msaaSamples, colorFormat, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, colorImage.handle, colorImage.memory);
+		colorImage.view = createImageView(colorImage.handle, colorFormat, VK_IMAGE_ASPECT_COLOR_BIT, 1);
 
 		// depth image
 		VkFormat depthFormat = bvk::support::findDepthFormat();
-		bvk::image::createImage(swapChainExtent.width, swapChainExtent.height, 1, msaaSamples, depthFormat, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, depthImage.image, depthImage.imageMemory);
-		depthImage.imageView = createImageView(depthImage.image, depthFormat, VK_IMAGE_ASPECT_DEPTH_BIT, 1);
-		bvk::image::transitionImageLayout(depthImage.image, depthFormat, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, 1);
+		bvk::image::createImage(swapChainExtent.width, swapChainExtent.height, 1, msaaSamples, depthFormat, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, depthImage.handle, depthImage.memory);
+		depthImage.view = createImageView(depthImage.handle, depthFormat, VK_IMAGE_ASPECT_DEPTH_BIT, 1);
+		bvk::image::transitionImageLayout(depthImage.handle, depthFormat, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, 1);
 
 		// post processing image
 		VkFormat postFormat = swapChainImageFormat;
-		bvk::image::createImage(swapChainExtent.width, swapChainExtent.height, 1, VK_SAMPLE_COUNT_1_BIT, postFormat, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, postImage.image, postImage.imageMemory);
-		postImage.imageView = createImageView(postImage.image, postFormat, VK_IMAGE_ASPECT_COLOR_BIT, 1);
+		bvk::image::createImage(swapChainExtent.width, swapChainExtent.height, 1, VK_SAMPLE_COUNT_1_BIT, postFormat, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, postImage.handle, postImage.memory);
+		postImage.view = createImageView(postImage.handle, postFormat, VK_IMAGE_ASPECT_COLOR_BIT, 1);
 		VkSamplerCreateInfo postSamplerCI = bvk::create::createSamplerCI();
 		postSamplerCI.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
 		postSamplerCI.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-		if (vkCreateSampler(device, &postSamplerCI, nullptr, &postImageSampler) != VK_SUCCESS) {
+		if (vkCreateSampler(device, &postSamplerCI, nullptr, &postImage.sampler) != VK_SUCCESS) {
 			throw std::runtime_error("Failed to create texture sampler!");
 		}
 	}
@@ -1079,11 +1035,11 @@ private:
 	void createTextureImage() {
 		// regular texture
 		loadTexture(TEXTURE_PATH, textureImage);
-		textureImage.imageView = createImageView(textureImage.image, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_ASPECT_COLOR_BIT, textureImage.mipLevels);
+		textureImage.view = createImageView(textureImage.handle, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_ASPECT_COLOR_BIT, textureImage.mipLevels);
 
 		VkSamplerCreateInfo samplerInfo = bvk::create::createSamplerCI();
 		samplerInfo.maxLod = static_cast<float>(textureImage.mipLevels);
-		if (vkCreateSampler(device, &samplerInfo, nullptr, &textureSampler) != VK_SUCCESS) {
+		if (vkCreateSampler(device, &samplerInfo, nullptr, &textureImage.sampler) != VK_SUCCESS) {
 			throw std::runtime_error("Failed to create texture sampler!");
 		}
 
@@ -1096,11 +1052,11 @@ private:
 			"res/cubemap/posz.jpg",
 			"res/cubemap/negz.jpg",
 		}, cubeMap);
-		cubeMap.imageView = createImageView(cubeMap.image, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_ASPECT_COLOR_BIT, cubeMap.mipLevels, VK_IMAGE_VIEW_TYPE_CUBE, 6);
+		cubeMap.view = createImageView(cubeMap.handle, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_ASPECT_COLOR_BIT, cubeMap.mipLevels, VK_IMAGE_VIEW_TYPE_CUBE, 6);
 		VkSamplerCreateInfo samplerCI = bvk::create::createSamplerCI();
 		samplerCI.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
 		samplerCI.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-		if (vkCreateSampler(device, &samplerCI, nullptr, &cubeMapSampler) != VK_SUCCESS) {
+		if (vkCreateSampler(device, &samplerCI, nullptr, &cubeMap.sampler) != VK_SUCCESS) {
 			throw std::runtime_error("Failed to create texture sampler!");
 		}
 	}
@@ -1363,8 +1319,8 @@ private:
 				renderPassBeginInfo.clearValueCount = static_cast<uint32_t>(clearValues.size());
 				renderPassBeginInfo.pClearValues = clearValues.data();
 
-				renderPassBeginInfo.framebuffer = offscreenPass.frameBuffer;
-				renderPassBeginInfo.renderPass = offscreenPass.renderPass;
+				renderPassBeginInfo.framebuffer = shadowFB.framebuffer;
+				renderPassBeginInfo.renderPass = shadowPass;
 
 				vkCmdBeginRenderPass(commandBuffers[i], &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
 				{
@@ -1489,20 +1445,9 @@ private:
 				bufferInfo.offset = 0;
 				bufferInfo.range = sizeof(UniformBufferObject);
 
-				VkDescriptorImageInfo imageInfo{};
-				imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-				imageInfo.imageView = textureImage.imageView;
-				imageInfo.sampler = textureSampler;
-
-				VkDescriptorImageInfo cubemapInfo{};
-				cubemapInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-				cubemapInfo.imageView = cubeMap.imageView;
-				cubemapInfo.sampler = cubeMapSampler;
-
-				VkDescriptorImageInfo shadowmapInfo{};
-				shadowmapInfo.imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
-				shadowmapInfo.imageView = offscreenPass.depth.imageView;
-				shadowmapInfo.sampler = offscreenPass.depthSampler;
+				VkWriteDescriptorSet imageDW = textureImage.getDescriptorWrite(1, descriptorSets.attachmentWrite[i]);
+				VkWriteDescriptorSet cubemapInfo = cubeMap.getDescriptorWrite(2, descriptorSets.attachmentWrite[i]);
+				VkWriteDescriptorSet shadowmapInfo = shadowFB.image.getDescriptorWrite(3, descriptorSets.attachmentWrite[i], VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL);
 
 				std::array<VkWriteDescriptorSet, 4> descriptorWrites{};
 
@@ -1514,29 +1459,9 @@ private:
 				descriptorWrites[0].descriptorCount = 1;
 				descriptorWrites[0].pBufferInfo = &bufferInfo;
 
-				descriptorWrites[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-				descriptorWrites[1].dstSet = descriptorSets.attachmentWrite[i];
-				descriptorWrites[1].dstBinding = 1;
-				descriptorWrites[1].dstArrayElement = 0;
-				descriptorWrites[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-				descriptorWrites[1].descriptorCount = 1;
-				descriptorWrites[1].pImageInfo = &imageInfo;
-
-				descriptorWrites[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-				descriptorWrites[2].dstSet = descriptorSets.attachmentWrite[i];
-				descriptorWrites[2].dstBinding = 2;
-				descriptorWrites[2].dstArrayElement = 0;
-				descriptorWrites[2].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-				descriptorWrites[2].descriptorCount = 1;
-				descriptorWrites[2].pImageInfo = &cubemapInfo;
-
-				descriptorWrites[3].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-				descriptorWrites[3].dstSet = descriptorSets.attachmentWrite[i];
-				descriptorWrites[3].dstBinding = 3;
-				descriptorWrites[3].dstArrayElement = 0;
-				descriptorWrites[3].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-				descriptorWrites[3].descriptorCount = 1;
-				descriptorWrites[3].pImageInfo = &shadowmapInfo;
+				descriptorWrites[1] = imageDW;
+				descriptorWrites[2] = cubemapInfo;
+				descriptorWrites[3] = shadowmapInfo;
 
 				vkUpdateDescriptorSets(device, static_cast<uint32_t>(descriptorWrites.size()), descriptorWrites.data(), 0, nullptr);
 			}
@@ -1560,10 +1485,8 @@ private:
 				bufferInfo.offset = 0;
 				bufferInfo.range = sizeof(UniformBufferObject);
 
-				VkDescriptorImageInfo inputAttachmentInfo{};
-				inputAttachmentInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-				inputAttachmentInfo.imageView = postImage.imageView;
-				inputAttachmentInfo.sampler = postImageSampler;
+				VkWriteDescriptorSet inputAttachmentInfo = postImage.getDescriptorWrite(1, descriptorSets.attachmentRead[i]);
+				VkWriteDescriptorSet shadowmapInfo = shadowFB.image.getDescriptorWrite(2, descriptorSets.attachmentRead[i], VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL);
 
 				std::array<VkWriteDescriptorSet, 3> descriptorWrites{};
 
@@ -1575,27 +1498,8 @@ private:
 				descriptorWrites[0].descriptorCount = 1;
 				descriptorWrites[0].pBufferInfo = &bufferInfo;
 
-				descriptorWrites[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-				descriptorWrites[1].dstSet = descriptorSets.attachmentRead[i];
-				descriptorWrites[1].dstBinding = 1;
-				descriptorWrites[1].dstArrayElement = 0;
-				descriptorWrites[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-				descriptorWrites[1].descriptorCount = 1;
-				descriptorWrites[1].pImageInfo = &inputAttachmentInfo;
-
-
-				VkDescriptorImageInfo shadowmapInfo{};
-				shadowmapInfo.imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
-				shadowmapInfo.imageView = offscreenPass.depth.imageView;
-				shadowmapInfo.sampler = textureSampler;
-
-				descriptorWrites[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-				descriptorWrites[2].dstSet = descriptorSets.attachmentRead[i];
-				descriptorWrites[2].dstBinding = 2;
-				descriptorWrites[2].dstArrayElement = 0;
-				descriptorWrites[2].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-				descriptorWrites[2].descriptorCount = 1;
-				descriptorWrites[2].pImageInfo = &shadowmapInfo;
+				descriptorWrites[1] = inputAttachmentInfo;
+				descriptorWrites[2] = shadowmapInfo;
 
 				vkUpdateDescriptorSets(device, static_cast<uint32_t>(descriptorWrites.size()), descriptorWrites.data(), 0, nullptr);
 			}
@@ -1713,7 +1617,7 @@ private:
 		destroyImage(device, depthImage);
 		destroyImage(device, colorImage);
 		destroyImage(device, postImage);
-		vkDestroySampler(device, postImageSampler, nullptr);
+		vkDestroySampler(device, postImage.sampler, nullptr);
 
 		for (size_t i = 0; i < swapChainFramebuffers.size(); i++) {
 			vkDestroyFramebuffer(device, swapChainFramebuffers[i], nullptr);
@@ -1776,10 +1680,7 @@ private:
 	void cleanup() {
 		cleanupSwapChain();
 
-		vkDestroySampler(device, textureSampler, nullptr);
 		destroyImage(device, textureImage);
-
-		vkDestroySampler(device, cubeMapSampler, nullptr);
 		destroyImage(device, cubeMap);
 
 		destroyMeshBuffer(device, meshBuffer);
@@ -1806,18 +1707,4 @@ private:
 	}
 };
 
-
-int main() {
-	VulkanDemo app;
-
-	try {
-
-		app.run();
-	}
-	catch (const std::exception& e) {
-		std::cerr << e.what() << std::endl;
-		return EXIT_FAILURE;
-	}
-
-	return EXIT_SUCCESS;
-}
+#endif

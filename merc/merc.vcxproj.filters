@@ -18,7 +18,7 @@
     <ClCompile Include="FlyCam.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="VulkanDemo.cpp">
+    <ClCompile Include="Main.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
@@ -26,37 +26,13 @@
     <None Include="compile_shaders.bat">
       <Filter>Resource Files</Filter>
     </None>
-    <None Include="shader.vert">
-      <Filter>Source Files</Filter>
-    </None>
-    <None Include="shader.frag">
-      <Filter>Source Files</Filter>
-    </None>
-    <None Include="noproj.vert">
-      <Filter>Source Files</Filter>
-    </None>
-    <None Include="blit.frag">
-      <Filter>Source Files</Filter>
-    </None>
-    <None Include="skybox.frag">
-      <Filter>Source Files</Filter>
-    </None>
-    <None Include="skybox.vert">
-      <Filter>Source Files</Filter>
-    </None>
-    <None Include="eval.tese">
-      <Filter>Source Files</Filter>
-    </None>
-    <None Include="control.tesc">
-      <Filter>Source Files</Filter>
-    </None>
-    <None Include="shadow.vert">
-      <Filter>Source Files</Filter>
-    </None>
     <None Include="test.vert">
       <Filter>Source Files</Filter>
     </None>
-    <None Include="test.frag">
+    <None Include="res\shaders\skybox\skybox.frag">
+      <Filter>Source Files</Filter>
+    </None>
+    <None Include="res\shaders\skybox\skybox.vert">
       <Filter>Source Files</Filter>
     </None>
   </ItemGroup>
@@ -73,10 +49,16 @@
     <ClInclude Include="Bvk.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="nuklear-glfw-vulkan.h">
+    <ClInclude Include="NewDemo.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="nuklear.h">
+    <ClInclude Include="Demo.hpp">
+      <Filter>Source Files</Filter>
+    </ClInclude>
+    <ClInclude Include="VulkanDemo.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rgraph.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
