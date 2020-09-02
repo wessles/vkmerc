@@ -41,6 +41,14 @@ MeshData box = {
 		0, 4, 1
 	}
 };
+MeshData blit = {
+	{
+		{{-1,-1,0}, {},{0,0},{}},
+		{{-1,3,0}, {},{0,2},{}},
+		{{3,-1,0}, {},{2,0},{}},
+	},
+	{0,1,2}
+};
 
 struct GlobalUniform
 {
@@ -260,6 +268,16 @@ struct Material {
 		vkCreateGraphicsPipelines(vku::state::device, VK_NULL_HANDLE, 1, &pipelineBuilder->pipelineInfo, nullptr, &pipeline);
 		delete pipelineBuilder;
 	}
+
+	void destroy(VkDescriptorPool &descriptorPool) {
+		for (auto &sMod : shaderModules) {
+			vkDestroyShaderModule(vku::state::device, sMod, nullptr);
+		}
+
+		vkDestroyDescriptorSetLayout(vku::state::device, descriptorSetLayout, nullptr);
+		vkDestroyPipelineLayout(vku::state::device, pipelineLayout, nullptr);
+		vkDestroyPipeline(vku::state::device, pipeline, nullptr);
+	}
 };
 
 struct MaterialInstance {
@@ -269,6 +287,7 @@ struct MaterialInstance {
 
 	MaterialInstance(const Material *mat, VkDescriptorPool &descriptorPool) {
 		this->material = mat;
+
 		VkDescriptorSetLayout dSetLayout = this->material->descriptorSetLayout;
 
 		std::vector<VkDescriptorSetLayout> layouts(vku::state::SWAPCHAIN_SIZE, dSetLayout);
@@ -318,6 +337,10 @@ class Demo : public Engine {
 	Material skyboxMat;
 	MaterialInstance skyboxMatInstance;
 
+	MeshBuffer blitMeshBuf;
+	Material blitMat;
+	MaterialInstance blitMatInstance;
+
 	Material testBoxMat;
 	MaterialInstance testBoxMatInstance;
 
@@ -333,23 +356,21 @@ public:
 			{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_VERTEX_BIT},
 		});
 
+		flycam = FlyCam(vku::state::windowHandle);
+
 		loadMeshes();
 
-		createUniforms();
-		createDescriptorSets();
+		buildRenderGraph();
 
-		createRenderGraph();
-		createMaterials();
-		createCommandBuffers();
-
-		flycam = FlyCam(vku::state::windowHandle);
+		buildSwapchainDependants();
 	}
 
 	void loadMeshes() {
 		skyboxMeshBuf.load(box);
+		blitMeshBuf.load(blit);
 	}
 
-	void createRenderGraph() {
+	void buildRenderGraph() {
 		mainPass = graph.addPass([&](uint32_t i, VkCommandBuffer cb) {
 			VkDeviceSize offsets[] = { 0 };
 			vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, skyboxMat.pipeline);
@@ -364,23 +385,33 @@ public:
 			vkCmdBindIndexBuffer(cb, skyboxMeshBuf.iBuffer, 0, VK_INDEX_TYPE_UINT32);
 			vkCmdDrawIndexed(cb, skyboxMeshBuf.indicesSize, 1, 0, 0, 0);
 		});
-		//blitPass = graph.addPass([&](uint32_t i, VkCommandBuffer cb) {
-		//});
+		blitPass = graph.addPass([&](uint32_t i, VkCommandBuffer cb) {
+			VkDeviceSize offsets[] = { 0 };
+			vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, blitMat.pipeline);
+			std::vector<VkDescriptorSet> descriptors{
+				globalDescriptorSets[i],
+				blitPass->instances[i].descriptorSet,
+				blitMatInstance.descriptorSets[i]
+			};
+			vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, blitMat.pipelineLayout, 0, static_cast<uint32_t>(descriptors.size()), descriptors.data(), 0, nullptr);
+			VkBuffer vBufs[] = { blitMeshBuf.vBuffer };
+			vkCmdBindVertexBuffers(cb, 0, 1, vBufs, offsets);
+			vkCmdBindIndexBuffer(cb, blitMeshBuf.iBuffer, 0, VK_INDEX_TYPE_UINT32);
+			vkCmdDrawIndexed(cb, blitMeshBuf.indicesSize, 1, 0, 0, 0);
+		});
 		graph.begin(mainPass);
 		graph.terminate(mainPass);
-		//graph.terminate(blitPass);
+		graph.terminate(blitPass);
 
 		// one color attachment
-		//REdge *color = graph.addAttachment(mainPass, blitPass);
-		//color->format = vku::state::screenFormat;
-		//color->samples = VK_SAMPLE_COUNT_1_BIT;
+		REdge *color = graph.addAttachment(mainPass, blitPass);
+		color->format = vku::state::screenFormat;
+		color->samples = VK_SAMPLE_COUNT_1_BIT;
 
 		// present attachment
-		REdge *output = graph.addAttachment(mainPass, nullptr);
+		REdge *output = graph.addAttachment(blitPass, nullptr);
 		output->format = vku::state::screenFormat;
 		output->samples = VK_SAMPLE_COUNT_1_BIT;
-
-		graph.process(descriptorPool);
 	}
 
 	void createUniforms() {
@@ -415,8 +446,8 @@ public:
 	}
 
 	void createMaterials() {
+		// skybox
 		{
-			// skybox shaders
 			skyboxMat = Material(globalDSetLayout, mainPass->pass, mainPass->inputLayout, {
 				{"res/shaders/skybox/vert.spv", VK_SHADER_STAGE_VERTEX_BIT},
 				{"res/shaders/skybox/frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT}
@@ -442,8 +473,14 @@ public:
 			}
 			skyboxMatInstance.write(0, cubeMap);
 		}
+		// blit
 		{
-			// 
+			blitMat = Material(globalDSetLayout, blitPass->pass, blitPass->inputLayout, {
+				{"res/shaders/post/vert.spv", VK_SHADER_STAGE_VERTEX_BIT},
+				{"res/shaders/post/frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT}
+				});
+			blitMat.createPipeline();
+			blitMatInstance = MaterialInstance(&blitMat, this->descriptorPool);
 		}
 	}
 
@@ -557,7 +594,6 @@ public:
 				vkCmdEndRenderPass(commandBuffers[i]);
 			}
 
-
 			if (vkEndCommandBuffer(commandBuffers[i]) != VK_SUCCESS) {
 				throw std::runtime_error("Failed to end command buffer record!");
 			}
@@ -569,16 +605,38 @@ public:
 		return &commandBuffers[imageIdx];
 	}
 
-	void postSwapchainRefresh() {
-		graph.destroy();
+	void buildSwapchainDependants() {
+		createUniforms();
+		createDescriptorSets();
+
 		graph.process(descriptorPool);
+		createMaterials();
+		createCommandBuffers();
+	}
+
+	void destroySwapchainDependents() {
+		vkFreeCommandBuffers(vku::state::device, vku::state::commandPool, static_cast<uint32_t>(commandBuffers.size()), commandBuffers.data());
+		
+		skyboxMat.destroy(descriptorPool);
+		blitMat.destroy(descriptorPool);
+		destroyImage(vku::state::device, cubeMap);
+		
+		graph.destroy(descriptorPool);
+
+		vkDestroyDescriptorPool(vku::state::device, descriptorPool, nullptr);
+
+		for (size_t i = 0; i < vku::state::SWAPCHAIN_SIZE; i++) {
+			vkDestroyBuffer(vku::state::device, uniformBuffers[i].buffer, nullptr);
+			vkFreeMemory(vku::state::device, uniformBuffers[i].memory, nullptr);
+		}
 	}
 
 	void preCleanup() {
-		vkDestroyDescriptorSetLayout(vku::state::device, globalDSetLayout, nullptr);
-		vkDestroyPipeline(vku::state::device, skyboxMat.pipeline, nullptr);
-		vkDestroyPipelineLayout(vku::state::device, skyboxMat.pipelineLayout, nullptr);
+		destroySwapchainDependents();
 
-		graph.destroy();
+		destroyMeshBuffer(vku::state::device, skyboxMeshBuf);
+		destroyMeshBuffer(vku::state::device, blitMeshBuf);
+
+		vkDestroyDescriptorSetLayout(vku::state::device, globalDSetLayout, nullptr);
 	}
 };

@@ -276,6 +276,8 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="compile_shaders.bat" />
+    <None Include="res\shaders\post\shader.frag" />
+    <None Include="res\shaders\post\shader.vert" />
     <None Include="res\shaders\skybox\skybox.frag" />
     <None Include="res\shaders\skybox\skybox.vert" />
     <None Include="test.vert" />
@@ -290,20 +292,6 @@
     <Image Include="D:\Downloads\statue.jpg" />
     <Image Include="erato.jpg" />
     <Image Include="viking_room.png" />
-  </ItemGroup>
-  <ItemGroup>
-    <Object Include="erato.obj">
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
-    </Object>
-    <Object Include="viking_room.obj">
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
-    </Object>
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

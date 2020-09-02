@@ -94,9 +94,111 @@ namespace vku::rgraph {
 			}
 			processed = true;
 
+			// generate singular resources for nodes (renderpass, descriptor set layout)
+			// as opposed to the duplicated resources we make later (descriptor set, framebuffer)
+			for(RNode *node : nodes){
+				// generate one render pass for each node
+				{
+					RNode &current = *node;
+
+					bool isStart = this->start == &current;
+					bool isEnd = this->end == &current;
+
+					std::vector<VkAttachmentDescription> attachments;
+					std::vector<VkAttachmentReference> inputRefs;
+					std::vector<VkAttachmentReference> outputRefs;
+					uint32_t i = 0;
+
+					for (auto &edge : current.in) {
+						VkAttachmentDescription attachment{};
+						attachment.format = edge->format;
+						attachment.samples = edge->samples;
+						attachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+						attachment.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+						attachment.initialLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+						attachment.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+						attachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+						attachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+
+						attachments.push_back(attachment);
+						inputRefs.push_back({ i++, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL });
+					}
+
+					if (isEnd && current.out.size() != 1) {
+						throw std::runtime_error("Out node must have *exactly* one outgoing attachment.");
+					}
+
+					for (auto &edge : current.out) {
+						VkAttachmentDescription attachment{};
+						attachment.format = edge->format;
+						attachment.samples = edge->samples;
+						attachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+						attachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+						attachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+						attachment.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+						attachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+						attachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+						if (isEnd)
+							attachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+
+						attachments.push_back(attachment);
+						outputRefs.push_back({ i++, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL });
+					}
+
+					VkSubpassDescription subpass{};
+					subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+					subpass.colorAttachmentCount = outputRefs.size();
+					subpass.pColorAttachments = outputRefs.data();
+					subpass.inputAttachmentCount = inputRefs.size();
+					subpass.pInputAttachments = inputRefs.data();
+					subpass.pDepthStencilAttachment = 0;
+
+					std::array<VkSubpassDependency, 2> dependencies;
+
+					dependencies[0].srcSubpass = VK_SUBPASS_EXTERNAL;
+					dependencies[0].dstSubpass = 0;
+					dependencies[0].srcStageMask = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
+					dependencies[0].dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+					dependencies[0].srcAccessMask = VK_ACCESS_MEMORY_READ_BIT;
+					dependencies[0].dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+					dependencies[0].dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT;
+
+					dependencies[1].srcSubpass = 0;
+					dependencies[1].dstSubpass = VK_SUBPASS_EXTERNAL;
+					dependencies[1].srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+					dependencies[1].dstStageMask = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
+					dependencies[1].srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+					dependencies[1].dstAccessMask = VK_ACCESS_MEMORY_READ_BIT;
+					dependencies[1].dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT;
+
+					VkRenderPassCreateInfo renderPassCreateInfo{};
+					renderPassCreateInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+					renderPassCreateInfo.attachmentCount = static_cast<uint32_t>(attachments.size());
+					renderPassCreateInfo.pAttachments = &attachments[0];
+					renderPassCreateInfo.subpassCount = 1;
+					renderPassCreateInfo.pSubpasses = &subpass;
+					renderPassCreateInfo.dependencyCount = static_cast<uint32_t>(dependencies.size());
+					renderPassCreateInfo.pDependencies = dependencies.data();
+
+					VkRenderPass pass;
+					if (vkCreateRenderPass(vku::state::device, &renderPassCreateInfo, nullptr, &pass) != VK_SUCCESS) {
+						throw std::runtime_error("Failed to create render pass.");
+					}
+					node->pass = pass;
+				}
+				// generate one descriptor set layout for each node
+				{
+					std::vector<vku::descriptor::DescriptorLayout> layouts;
+					for (auto &inputEdge : node->in) {
+						layouts.push_back({ VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT });
+					}
+					vku::descriptor::createDescriptorSetLayout(&node->inputLayout, layouts);
+				}
+			}
+
 			// we need to process multiple instances for each element of the graph
 			// so that we can avoid data hazards in the render loop
-			for(uint32_t i = 0; i < 3; i++) {
+			for(uint32_t i = 0; i < vku::state::SWAPCHAIN_SIZE; i++) {
 				// part I: generate attachment images
 				{
 					VkExtent2D &screen = vku::state::swapChainExtent;
@@ -105,7 +207,9 @@ namespace vku::rgraph {
 							continue;
 						}
 
-						Image image;
+						// alias for brevity
+						Image &image = edge->instances[i].image;
+
 						createImage(
 							screen.width, screen.height, 1,
 							edge->samples, edge->format,
@@ -121,12 +225,9 @@ namespace vku::rgraph {
 						if (vkCreateSampler(vku::state::device, &samplerCI, nullptr, &image.sampler) != VK_SUCCESS) {
 							throw std::runtime_error("Failed to create attachment sampler!");
 						}
-
-						edge->instances[i].image = image;
 					}
 				}
-
-				// (Part II) generate render passes / framebuffers
+				// (Part II) generate descriptor set/layout and framebuffers
 				{
 					for (RNode *node : this->nodes) {
 						RNode &current = *node;
@@ -134,99 +235,8 @@ namespace vku::rgraph {
 						bool isStart = this->start == &current;
 						bool isEnd = this->end == &current;
 
-						// (Part II.A) generate render pass
+						// (Part II.A) create descriptor set based on layout
 						{
-
-							std::vector<VkAttachmentDescription> attachments;
-							std::vector<VkAttachmentReference> inputRefs;
-							std::vector<VkAttachmentReference> outputRefs;
-							uint32_t i = 0;
-
-							for (auto &edge : current.in) {
-								VkAttachmentDescription attachment{};
-								attachment.format = edge->format;
-								attachment.samples = edge->samples;
-								attachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
-								attachment.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-								attachment.initialLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-								attachment.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-								attachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-								attachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-
-								attachments.push_back(attachment);
-								inputRefs.push_back({ i++, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL });
-							}
-
-							if (isEnd && current.out.size() != 1) {
-								throw std::runtime_error("Out node must have *exactly* one outgoing attachment.");
-							}
-
-							for (auto &edge : current.out) {
-								VkAttachmentDescription attachment{};
-								attachment.format = edge->format;
-								attachment.samples = edge->samples;
-								attachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-								attachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-								attachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-								attachment.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-								attachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-								attachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-								if (isEnd)
-									attachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-
-								attachments.push_back(attachment);
-								outputRefs.push_back({ i++, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL });
-							}
-
-							VkSubpassDescription subpass{};
-							subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
-							subpass.colorAttachmentCount = outputRefs.size();
-							subpass.pColorAttachments = outputRefs.data();
-							subpass.inputAttachmentCount = inputRefs.size();
-							subpass.pInputAttachments = inputRefs.data();
-							subpass.pDepthStencilAttachment = 0;
-
-							std::array<VkSubpassDependency, 2> dependencies;
-
-							dependencies[0].srcSubpass = VK_SUBPASS_EXTERNAL;
-							dependencies[0].dstSubpass = 0;
-							dependencies[0].srcStageMask = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
-							dependencies[0].dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-							dependencies[0].srcAccessMask = VK_ACCESS_MEMORY_READ_BIT;
-							dependencies[0].dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-							dependencies[0].dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT;
-
-							dependencies[1].srcSubpass = 0;
-							dependencies[1].dstSubpass = VK_SUBPASS_EXTERNAL;
-							dependencies[1].srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-							dependencies[1].dstStageMask = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
-							dependencies[1].srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-							dependencies[1].dstAccessMask = VK_ACCESS_MEMORY_READ_BIT;
-							dependencies[1].dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT;
-
-							VkRenderPassCreateInfo renderPassCreateInfo{};
-							renderPassCreateInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
-							renderPassCreateInfo.attachmentCount = static_cast<uint32_t>(attachments.size());
-							renderPassCreateInfo.pAttachments = &attachments[0];
-							renderPassCreateInfo.subpassCount = 1;
-							renderPassCreateInfo.pSubpasses = &subpass;
-							renderPassCreateInfo.dependencyCount = static_cast<uint32_t>(dependencies.size());
-							renderPassCreateInfo.pDependencies = dependencies.data();
-
-							VkRenderPass pass;
-							if (vkCreateRenderPass(vku::state::device, &renderPassCreateInfo, nullptr, &pass) != VK_SUCCESS) {
-								throw std::runtime_error("Failed to create render pass.");
-							}
-							node->pass = pass;
-						}
-						// (Part II.B) create descriptor set / layout
-						{
-							std::vector<vku::descriptor::DescriptorLayout> layouts;
-							for (auto &inputEdge : node->in) {
-								layouts.push_back({ VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT });
-							}
-							vku::descriptor::createDescriptorSetLayout(&node->inputLayout, layouts);
-
 							VkDescriptorSetAllocateInfo allocInfo{};
 							allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
 							allocInfo.descriptorPool = pool;
@@ -239,7 +249,7 @@ namespace vku::rgraph {
 								}
 							}
 						}
-						// (Part II.C) create framebuffers
+						// (Part II.B) create framebuffers
 						{
 							std::vector<VkImageView> attachmentImageViews;
 
@@ -272,7 +282,7 @@ namespace vku::rgraph {
 				}
 			}
 			// Now that all nodes have allocated their descriptor sets, let's write input image references to them
-			for (uint32_t i = 0; i < 3; i++) {
+			for (uint32_t i = 0; i < vku::state::SWAPCHAIN_SIZE; i++) {
 				for (REdge *edge : this->edges) {
 					if (edge->to == nullptr) continue;
 
@@ -292,18 +302,20 @@ namespace vku::rgraph {
 				}
 			}
 		}
-		void destroy() {
-			for (int i = 0; i < 3; i++) {
-				for (RNode* node : nodes) {
+		void destroy(VkDescriptorPool &pool) {
+			for (RNode* node : nodes) {
+				for (int i = 0; i < vku::state::SWAPCHAIN_SIZE; i++) {
 					vkDestroyFramebuffer(vku::state::device, node->instances[i].framebuffer, nullptr);
-					vkDestroyRenderPass(vku::state::device, node->pass, nullptr);
-					delete node;
 				}
-				for (REdge* edge : edges) {
+				vkDestroyDescriptorSetLayout(vku::state::device, node->inputLayout, nullptr);
+				vkDestroyRenderPass(vku::state::device, node->pass, nullptr);
+			}
+			for (REdge* edge : edges) {
+				for (int i = 0; i < vku::state::SWAPCHAIN_SIZE; i++) {
 					vku::image::destroyImage(vku::state::device, edge->instances[i].image);
-					delete edge;
 				}
 			}
+
 			processed = false;
 		}
 	};

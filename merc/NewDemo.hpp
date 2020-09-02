@@ -55,7 +55,8 @@ private:
 
 	virtual void postInit() = 0;
 	virtual VkCommandBuffer *draw(uint32_t swapIdx) = 0;
-	virtual void postSwapchainRefresh() = 0;
+	virtual void destroySwapchainDependents() = 0;
+	virtual void buildSwapchainDependants() = 0;
 	virtual void preCleanup() = 0;
 
 	void init() {
@@ -69,8 +70,12 @@ private:
 	}
 
 	void refreshSwapchain() {
+		// very important for synchronization
+		vkDeviceWaitIdle(state::device);
+
+		destroySwapchainDependents();
 		vku::swap::recreateSwapchain();
-		postSwapchainRefresh();
+		buildSwapchainDependants();
 	}
 
 	void cleanup() {
@@ -108,7 +113,7 @@ private:
 				// check for out of date swap chain
 				if (result == VK_ERROR_OUT_OF_DATE_KHR) {
 					refreshSwapchain();
-					return;
+					continue;
 				}
 				else if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR) {
 					throw std::runtime_error("Failed to acquire swap chain image!");

@@ -35,6 +35,12 @@
     <None Include="res\shaders\skybox\skybox.vert">
       <Filter>Source Files</Filter>
     </None>
+    <None Include="res\shaders\post\shader.frag">
+      <Filter>Source Files</Filter>
+    </None>
+    <None Include="res\shaders\post\shader.vert">
+      <Filter>Source Files</Filter>
+    </None>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="stb_image.h">
@@ -72,13 +78,5 @@
     <Image Include="erato.jpg">
       <Filter>Resource Files</Filter>
     </Image>
-  </ItemGroup>
-  <ItemGroup>
-    <Object Include="viking_room.obj">
-      <Filter>Resource Files</Filter>
-    </Object>
-    <Object Include="erato.obj">
-      <Filter>Resource Files</Filter>
-    </Object>
   </ItemGroup>
 </Project>

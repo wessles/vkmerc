@@ -1095,14 +1095,12 @@ namespace vku::swap {
 		createInfo.imageArrayLayers = 1;
 		createInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
 
-
 		if (state::queueFamilyIndices.graphicsFamily != state::queueFamilyIndices.presentFamily) {
 			uint32_t queueIndices[] = { state::queueFamilyIndices.graphicsFamily.value(), state::queueFamilyIndices.presentFamily.value() };
 			createInfo.imageSharingMode = VK_SHARING_MODE_CONCURRENT;
 			createInfo.queueFamilyIndexCount = 2;
 			createInfo.pQueueFamilyIndices = queueIndices;
-		}
-		else {
+		} else {
 			createInfo.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
 			createInfo.queueFamilyIndexCount = 0; // Optional
 			createInfo.pQueueFamilyIndices = nullptr; // Optional
@@ -1138,7 +1136,6 @@ namespace vku::swap {
 
 		// create image views
 		state::swapChainImageViews.resize(state::swapChainImages.size());
-
 		for (size_t i = 0; i < state::swapChainImages.size(); i++) {
 			state::swapChainImageViews[i] = vku::image::createImageView(state::swapChainImages[i], state::screenFormat, VK_IMAGE_ASPECT_COLOR_BIT, 1);
 		}
@@ -1152,7 +1149,6 @@ namespace vku::swap {
 		vkDestroySwapchainKHR(state::device, state::swapChain, nullptr);
 	}
 	void recreateSwapchain() {
-		vkDeviceWaitIdle(state::device);
 		cleanupSwapchain();
 		createSwapChain();
 	}
