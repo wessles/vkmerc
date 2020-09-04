@@ -265,8 +265,10 @@
     <ClCompile Include="FlyCam.cpp" />
     <ClCompile Include="Main.cpp" />
     <ClInclude Include="Demo.hpp" />
+    <ClInclude Include="material.h" />
     <ClInclude Include="NewDemo.hpp" />
     <ClInclude Include="rgraph.h" />
+    <ClInclude Include="sgraph.h" />
     <ClInclude Include="VulkanDemo.hpp">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
@@ -276,15 +278,13 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="compile_shaders.bat" />
-    <None Include="res\shaders\post\shader.frag" />
-    <None Include="res\shaders\post\shader.vert" />
-    <None Include="res\shaders\skybox\skybox.frag" />
-    <None Include="res\shaders\skybox\skybox.vert" />
+    <None Include="res\shaders\blurX\shader.frag" />
+    <None Include="res\shaders\blurX\shader.vert" />
     <None Include="test.vert" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="FlyCam.h" />
-    <ClInclude Include="Bvk.hpp" />
+    <ClInclude Include="Vku.hpp" />
     <ClInclude Include="stb_image.h" />
     <ClInclude Include="tiny_obj_loader.h" />
   </ItemGroup>

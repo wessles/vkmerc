@@ -562,14 +562,48 @@ namespace vku::mesh {
 			vku::buffer::initDeviceLocalBuffer<Vertex>(mesh.vertices, vBuffer, vMemory, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
 			indicesSize = mesh.indices.size();
 		}
+		void destroy() {
+			vkDestroyBuffer(vku::state::device, vBuffer, nullptr);
+			vkDestroyBuffer(vku::state::device, iBuffer, nullptr);
+			vkFreeMemory(vku::state::device, vMemory, nullptr);
+			vkFreeMemory(vku::state::device, iMemory, nullptr);
+		}
 	};
 
-	void destroyMeshBuffer(const VkDevice& device, MeshBuffer& meshBuffer) {
-		vkDestroyBuffer(device, meshBuffer.vBuffer, nullptr);
-		vkDestroyBuffer(device, meshBuffer.iBuffer, nullptr);
-		vkFreeMemory(device, meshBuffer.vMemory, nullptr);
-		vkFreeMemory(device, meshBuffer.iMemory, nullptr);
-	}
+	MeshData box = {
+		{
+			{{-1, -1, -1}, {}, {}, {1, 1, 1}},
+			{{1, -1, -1}, {}, {}, {-1, 1, 1}},
+			{{-1, 1, -1}, {}, {}, {1, -1, 1}},
+			{{1, 1, -1}, {}, {}, {-1, -1, 1}},
+			{{-1, -1, 1}, {}, {}, {1, 1, -1}},
+			{{1, -1, 1}, {}, {}, {-1, 1, -1}},
+			{{-1, 1, 1}, {}, {}, {1, -1, -1}},
+			{{1, 1, 1}, {}, {}, {-1, -1, -1}},
+		},
+		{
+			0, 3, 2,
+			0, 1, 3,
+			1, 5, 7,
+			1, 7, 3,
+			4, 7, 5,
+			4, 6, 7,
+			4, 2, 6,
+			4, 0, 2,
+			6, 2, 7,
+			2, 3, 7,
+			1, 4, 5,
+			0, 4, 1
+		}
+	};
+	MeshData blit = {
+		{
+			{{-1,-1,0}, {},{0,0},{}},
+			{{-1,3,0}, {},{0,2},{}},
+			{{3,-1,0}, {},{2,0},{}},
+		},
+		{0,1,2}
+	};
 }
 namespace std {
 	template<> struct hash<vku::mesh::Vertex> {
@@ -842,7 +876,6 @@ namespace vku::image {
 		viewInfo.image = image;
 		viewInfo.viewType = imageViewType;
 		viewInfo.format = format;
-		viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
 		viewInfo.subresourceRange.baseMipLevel = 0;
 		viewInfo.subresourceRange.levelCount = mipLevels;
 		viewInfo.subresourceRange.baseArrayLayer = 0;
@@ -851,7 +884,7 @@ namespace vku::image {
 
 		VkImageView view;
 		if (vkCreateImageView(state::device, &viewInfo, nullptr, &view) != VK_SUCCESS) {
-			throw std::runtime_error("failed to create texture image view!");
+			throw std::runtime_error("Failed to create texture image view!");
 		}
 
 		return view;

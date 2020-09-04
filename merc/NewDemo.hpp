@@ -8,7 +8,7 @@
 #include <chrono>
 #include <thread>
 
-#include "bvk.hpp"
+#include "Vku.hpp"
 
 struct IResource {
 	virtual void alloc(VkDevice device) = 0;

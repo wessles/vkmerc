@@ -1,13 +1,18 @@
 #pragma once
 
-#include "Bvk.hpp"
+/*
+This is a basic rendergraph implementation.
+First, build the render graph through functions in RGraph.
+Next, call graph.process() to create / allocate runtime resources
+Every time the swapchain changes this should be updated.
+*/
+
+#include "Vku.hpp"
 #include <vulkan/vulkan.h>
 
 using namespace vku::image;
 
 namespace vku::rgraph {
-
-
 	struct REdgeInstance {
 		Image image;
 	};
@@ -23,7 +28,7 @@ namespace vku::rgraph {
 
 	struct REdge {
 		RNode* from;
-		RNode* to;
+		std::vector<RNode*> to;
 		VkFormat format;
 		VkSampleCountFlagBits samples;
 
@@ -38,6 +43,7 @@ namespace vku::rgraph {
 
 		VkRenderPass pass;
 		VkDescriptorSetLayout inputLayout;
+		VkPipelineLayout pipelineLayout;
 
 		std::array<RNodeInstance, 3> instances;
 	};
@@ -73,14 +79,15 @@ namespace vku::rgraph {
 			this->end = node;
 		}
 
-		REdge* addAttachment(RNode* from, RNode* to) {
+		REdge* addAttachment(RNode* from, std::vector<RNode*> to) {
 			REdge *edge = new REdge();
 			edge->from = from;
 			edge->to = to;
 			if (edge->from != nullptr)
 				edge->from->out.push_back(edge);
-			if (edge->to != nullptr)
-				edge->to->in.push_back(edge);
+			for (RNode *node : edge->to) {
+				node->in.push_back(edge);
+			}
 			edges.push_back(edge);
 			return edge;
 		}
@@ -88,7 +95,7 @@ namespace vku::rgraph {
 	private:
 		bool processed = false;
 	public:
-		void process(VkDescriptorPool &pool) {
+		void process(VkDescriptorSetLayout globalDSet, VkDescriptorPool &pool) {
 			if (processed) {
 				throw std::runtime_error("This render Graph has already been processed!");
 			}
@@ -107,18 +114,28 @@ namespace vku::rgraph {
 					std::vector<VkAttachmentDescription> attachments;
 					std::vector<VkAttachmentReference> inputRefs;
 					std::vector<VkAttachmentReference> outputRefs;
+					VkAttachmentReference depthOutputRef;
+					bool depthWrite = false;
+
 					uint32_t i = 0;
 
 					for (auto &edge : current.in) {
+						bool isDepth = edge->format == vku::state::depthFormat;
+
 						VkAttachmentDescription attachment{};
 						attachment.format = edge->format;
 						attachment.samples = edge->samples;
 						attachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
 						attachment.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-						attachment.initialLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-						attachment.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 						attachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
 						attachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+						if (isDepth) {
+							attachment.initialLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+							attachment.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+						} else {
+							attachment.initialLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+							attachment.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+						}
 
 						attachments.push_back(attachment);
 						inputRefs.push_back({ i++, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL });
@@ -129,31 +146,55 @@ namespace vku::rgraph {
 					}
 
 					for (auto &edge : current.out) {
+						bool isDepth = edge->format == vku::state::depthFormat;
+
 						VkAttachmentDescription attachment{};
 						attachment.format = edge->format;
 						attachment.samples = edge->samples;
 						attachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
 						attachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-						attachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-						attachment.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 						attachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
 						attachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+						attachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+
+						if (isDepth) {
+							attachment.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+						} else {
+							attachment.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+						}
+
+						if (isEnd && isDepth) {
+							throw std::runtime_error("Cannot present a depth layout image!");
+						}
+
 						if (isEnd)
 							attachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
 
-						attachments.push_back(attachment);
-						outputRefs.push_back({ i++, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL });
+						if (isDepth) {
+							if (depthWrite) {
+								throw std::runtime_error("Cannot write to multiple depth attachments!");
+							}
+							depthWrite = true;
+							attachments.push_back(attachment);
+							depthOutputRef = { i++, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL };
+						} else {
+							attachments.push_back(attachment);
+							outputRefs.push_back({ i++, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL });
+						}
 					}
 
 					VkSubpassDescription subpass{};
 					subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
 					subpass.colorAttachmentCount = outputRefs.size();
+					
 					subpass.pColorAttachments = outputRefs.data();
 					subpass.inputAttachmentCount = inputRefs.size();
 					subpass.pInputAttachments = inputRefs.data();
-					subpass.pDepthStencilAttachment = 0;
+					if(depthWrite)
+						subpass.pDepthStencilAttachment = &depthOutputRef;
 
-					std::array<VkSubpassDependency, 2> dependencies;
+					std::vector<VkSubpassDependency> dependencies;
+					dependencies.resize(2);
 
 					dependencies[0].srcSubpass = VK_SUBPASS_EXTERNAL;
 					dependencies[0].dstSubpass = 0;
@@ -163,13 +204,33 @@ namespace vku::rgraph {
 					dependencies[0].dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
 					dependencies[0].dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT;
 
-					dependencies[1].srcSubpass = 0;
-					dependencies[1].dstSubpass = VK_SUBPASS_EXTERNAL;
-					dependencies[1].srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-					dependencies[1].dstStageMask = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
-					dependencies[1].srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-					dependencies[1].dstAccessMask = VK_ACCESS_MEMORY_READ_BIT;
-					dependencies[1].dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT;
+					if (depthWrite) {
+						dependencies.resize(3);
+
+						dependencies[1].srcSubpass = 0;
+						dependencies[1].dstSubpass = VK_SUBPASS_EXTERNAL;
+						dependencies[1].srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+						dependencies[1].dstStageMask = VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+						dependencies[1].srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+						dependencies[1].dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+						dependencies[1].dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT;
+
+						dependencies[2].srcSubpass = 0;
+						dependencies[2].dstSubpass = VK_SUBPASS_EXTERNAL;
+						dependencies[2].srcStageMask = VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+						dependencies[2].dstStageMask = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
+						dependencies[2].srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+						dependencies[2].dstAccessMask = VK_ACCESS_MEMORY_READ_BIT;
+						dependencies[2].dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT;
+					} else {
+						dependencies[1].srcSubpass = 0;
+						dependencies[1].dstSubpass = VK_SUBPASS_EXTERNAL;
+						dependencies[1].srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+						dependencies[1].dstStageMask = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
+						dependencies[1].srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+						dependencies[1].dstAccessMask = VK_ACCESS_MEMORY_READ_BIT;
+						dependencies[1].dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT;
+					}
 
 					VkRenderPassCreateInfo renderPassCreateInfo{};
 					renderPassCreateInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
@@ -194,6 +255,25 @@ namespace vku::rgraph {
 					}
 					vku::descriptor::createDescriptorSetLayout(&node->inputLayout, layouts);
 				}
+				// generate one pipeline layout for each node (must be a subset of all pipeline layouts hereafter)
+				{
+					std::vector<VkDescriptorSetLayout> layouts = {
+						globalDSet,
+						node->inputLayout
+					};
+
+					VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
+					pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+					pipelineLayoutInfo.setLayoutCount = static_cast<uint32_t>(layouts.size());
+					pipelineLayoutInfo.pSetLayouts = layouts.data();
+					pipelineLayoutInfo.pushConstantRangeCount = 0; // Optional
+					pipelineLayoutInfo.pPushConstantRanges = nullptr; // Optional
+
+					VkResult result = vkCreatePipelineLayout(vku::state::device, &pipelineLayoutInfo, nullptr, &node->pipelineLayout);
+					if (result != VK_SUCCESS) {
+						throw std::runtime_error("Failed to create pipeline layout for material!");
+					}
+				}
 			}
 
 			// we need to process multiple instances for each element of the graph
@@ -203,20 +283,36 @@ namespace vku::rgraph {
 				{
 					VkExtent2D &screen = vku::state::swapChainExtent;
 					for (REdge *edge : this->edges) {
-						if (edge->to == nullptr) {
+						if (edge->to.size() == 0) {
 							continue;
 						}
 
+						bool isDepth = edge->format == vku::state::depthFormat;
+
 						// alias for brevity
 						Image &image = edge->instances[i].image;
+
+						VkImageUsageFlagBits usage;
+						VkImageAspectFlagBits aspect;
+						if (isDepth) {
+							usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+							aspect = VK_IMAGE_ASPECT_DEPTH_BIT;
+						}
+						else {
+							usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+							aspect = VK_IMAGE_ASPECT_COLOR_BIT;
+						}
 
 						createImage(
 							screen.width, screen.height, 1,
 							edge->samples, edge->format,
 							VK_IMAGE_TILING_OPTIMAL,
-							VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+							VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | usage,
 							VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, image.handle, image.memory);
-						image.view = createImageView(image.handle, edge->format, VK_IMAGE_ASPECT_COLOR_BIT, 1);
+						image.view = createImageView(image.handle, edge->format, aspect, 1);
+						if (isDepth) {
+							vku::image::transitionImageLayout(image.handle, edge->format, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, 1);
+						}
 
 						VkSamplerCreateInfo samplerCI = vku::create::createSamplerCI();
 						samplerCI.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
@@ -284,21 +380,23 @@ namespace vku::rgraph {
 			// Now that all nodes have allocated their descriptor sets, let's write input image references to them
 			for (uint32_t i = 0; i < vku::state::SWAPCHAIN_SIZE; i++) {
 				for (REdge *edge : this->edges) {
-					if (edge->to == nullptr) continue;
+					if (edge->to.size() == 0) continue;
 
-					int bindingIndex = -1;
-					for (int k = 0; k < edge->to->in.size(); k++) {
-						if (edge->to->in[k] == edge) {
-							bindingIndex = k;
-							break;
+					for (RNode *node : edge->to) {
+						int bindingIndex = -1;
+						for (int k = 0; k < node->in.size(); k++) {
+							if (node->in[k] == edge) {
+								bindingIndex = k;
+								break;
+							}
 						}
-					}
-					if (bindingIndex == -1) {
-						throw std::runtime_error("Binding index for an edge could not be found in target node.");
-					}
+						if (bindingIndex == -1) {
+							throw std::runtime_error("Binding index for an edge could not be found in target node.");
+						}
 
-					VkWriteDescriptorSet setWrite = edge->instances[i].image.getDescriptorWrite(bindingIndex, edge->to->instances[i].descriptorSet);
-					vkUpdateDescriptorSets(vku::state::device, 1, &setWrite, 0, nullptr);
+						VkWriteDescriptorSet setWrite = edge->instances[i].image.getDescriptorWrite(bindingIndex, node->instances[i].descriptorSet);
+						vkUpdateDescriptorSets(vku::state::device, 1, &setWrite, 0, nullptr);
+					}
 				}
 			}
 		}
@@ -307,6 +405,7 @@ namespace vku::rgraph {
 				for (int i = 0; i < vku::state::SWAPCHAIN_SIZE; i++) {
 					vkDestroyFramebuffer(vku::state::device, node->instances[i].framebuffer, nullptr);
 				}
+				vkDestroyPipelineLayout(vku::state::device, node->pipelineLayout, nullptr);
 				vkDestroyDescriptorSetLayout(vku::state::device, node->inputLayout, nullptr);
 				vkDestroyRenderPass(vku::state::device, node->pass, nullptr);
 			}

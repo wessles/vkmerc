@@ -29,16 +29,10 @@
     <None Include="test.vert">
       <Filter>Source Files</Filter>
     </None>
-    <None Include="res\shaders\skybox\skybox.frag">
+    <None Include="res\shaders\blurX\shader.frag">
       <Filter>Source Files</Filter>
     </None>
-    <None Include="res\shaders\skybox\skybox.vert">
-      <Filter>Source Files</Filter>
-    </None>
-    <None Include="res\shaders\post\shader.frag">
-      <Filter>Source Files</Filter>
-    </None>
-    <None Include="res\shaders\post\shader.vert">
+    <None Include="res\shaders\blurX\shader.vert">
       <Filter>Source Files</Filter>
     </None>
   </ItemGroup>
@@ -52,9 +46,6 @@
     <ClInclude Include="FlyCam.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="Bvk.hpp">
-      <Filter>Header Files</Filter>
-    </ClInclude>
     <ClInclude Include="NewDemo.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -65,6 +56,15 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="rgraph.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="sgraph.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="material.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Vku.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>

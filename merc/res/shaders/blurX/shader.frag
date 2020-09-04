@@ -10,23 +10,21 @@ layout(std140, binding = 0) uniform GlobalUniform {
 } global;
 
 layout(set=1, binding = 0) uniform sampler2D screenbuffer;
-layout(set=1, binding = 1) uniform sampler2D bloom;
 
 layout(location = 0) in vec2 fragCoord;
 
 layout(location = 0) out vec4 outColor;
 
+const float spreadMult = 4.0;
+const int samples = 16;
+
 void main() {
 	vec2 pixel = fragCoord * global.screenRes;
-	vec2 uv = fragCoord;
 
-	float a = -0.5;
-	float t = length(uv - 0.5) * 2.0 + a;
-	float c = 0.01;
-	float k = mix(0.0, 1.0, c + (1.0 - c) * t);
+	float pixelSize = spreadMult / global.screenRes.x;
 
-	float atten = mix(1.0, 0.0, k);
-
-	outColor = texture(screenbuffer, uv) + 0.9 * texture(bloom, uv);
-	outColor.rgb *= atten;
+	outColor = vec4(0.0, 0.0, 0.0, 1.0);
+	for(int i = -int(floor(samples / 2.0)); i < int(ceil(samples / 2.0)); i++) {
+		outColor += texture(screenbuffer, fragCoord + vec2(i * pixelSize, 0.0)) / samples;
+	}
 }
