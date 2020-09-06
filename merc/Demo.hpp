@@ -82,8 +82,6 @@ class Demo : public Engine {
 
 	RGraph graph;
 	RNode *mainPass;
-	RNode *blurXPass;
-	RNode *blurYPass;
 	RNode *blitPass;
 
 	std::array<VkCommandBuffer, 3> commandBuffers;
@@ -101,11 +99,6 @@ class Demo : public Engine {
 
 	Material boxMat;
 	MaterialInstance boxMatInstance;
-
-	Material blurXMat;
-	MaterialInstance blurXMatInstance;
-	Material blurYMat;
-	MaterialInstance blurYMatInstance;
 
 public:
 	Demo() {
@@ -136,6 +129,7 @@ public:
 	void buildRenderGraph() {
 		mainPass = graph.addPass([&](uint32_t i, VkCommandBuffer cb) {
 			VkDeviceSize offsets[] = { 0 };
+
 			vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, skyboxMat.pipeline);
 			vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, skyboxMat.pipelineLayout, 2, 1, &skyboxMatInstance.descriptorSets[i], 0, nullptr);
 			vkCmdBindVertexBuffers(cb, 0, 1, &boxMeshBuf.vBuffer, offsets);
@@ -146,24 +140,9 @@ public:
 			vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, boxMat.pipelineLayout, 2, 1, &boxMatInstance.descriptorSets[i], 0, nullptr);
 			vkCmdDrawIndexed(cb, boxMeshBuf.indicesSize, 1, 0, 0, 0);
 		});
-		blurXPass = graph.addPass([&](uint32_t i, VkCommandBuffer cb) {
-			VkDeviceSize offsets[] = { 0 };
-			vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, blurXMat.pipeline);
-			vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, blurXMat.pipelineLayout, 2, 1, &blurXMatInstance.descriptorSets[i], 0, nullptr);
-			vkCmdBindVertexBuffers(cb, 0, 1, &blitMeshBuf.vBuffer, offsets);
-			vkCmdBindIndexBuffer(cb, blitMeshBuf.iBuffer, 0, VK_INDEX_TYPE_UINT32);
-			vkCmdDrawIndexed(cb, blitMeshBuf.indicesSize, 1, 0, 0, 0);
-		});
-		blurYPass = graph.addPass([&](uint32_t i, VkCommandBuffer cb) {
-			VkDeviceSize offsets[] = { 0 };
-			vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, blurYMat.pipeline);
-			vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, blurYMat.pipelineLayout, 2, 1, &blurYMatInstance.descriptorSets[i], 0, nullptr);
-			vkCmdBindVertexBuffers(cb, 0, 1, &blitMeshBuf.vBuffer, offsets);
-			vkCmdBindIndexBuffer(cb, blitMeshBuf.iBuffer, 0, VK_INDEX_TYPE_UINT32);
-			vkCmdDrawIndexed(cb, blitMeshBuf.indicesSize, 1, 0, 0, 0);
-		});
 		blitPass = graph.addPass([&](uint32_t i, VkCommandBuffer cb) {
 			VkDeviceSize offsets[] = { 0 };
+
 			vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, blitMat.pipeline);
 			vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, blitMat.pipelineLayout, 2, 1, &blitMatInstance.descriptorSets[i], 0, nullptr);
 			vkCmdBindVertexBuffers(cb, 0, 1, &blitMeshBuf.vBuffer, offsets);
@@ -172,24 +151,11 @@ public:
 		});
 
 		graph.begin(mainPass);
-		graph.terminate(mainPass);
 		graph.terminate(blitPass);
 
-		REdge *color = graph.addAttachment(mainPass, { blitPass, blurXPass });
+		REdge *color = graph.addAttachment(mainPass, { blitPass });
 		color->format = vku::state::screenFormat;
 		color->samples = VK_SAMPLE_COUNT_1_BIT;
-
-		REdge *blurred1 = graph.addAttachment(blurXPass, { blurYPass });
-		blurred1->format = vku::state::screenFormat;
-		blurred1->samples = VK_SAMPLE_COUNT_1_BIT;
-
-		REdge *blurred2 = graph.addAttachment(blurYPass, { blitPass });
-		blurred2->format = vku::state::screenFormat;
-		blurred2->samples = VK_SAMPLE_COUNT_1_BIT;
-
-		REdge *depth = graph.addAttachment(mainPass, { blitPass });
-		depth->format = vku::state::depthFormat;
-		depth->samples = VK_SAMPLE_COUNT_1_BIT;
 
 		REdge *output = graph.addAttachment(blitPass, {});
 		output->format = vku::state::screenFormat;
@@ -218,12 +184,13 @@ public:
 		// skybox
 		{
 			skyboxMat = Material(globalDSetLayout, mainPass->pass, mainPass->inputLayout, {
-				{"res/shaders/skybox/vert.spv", VK_SHADER_STAGE_VERTEX_BIT},
-				{"res/shaders/skybox/frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT}
+				{"res/shaders/skybox/skybox.vert", VK_SHADER_STAGE_VERTEX_BIT},
+				{"res/shaders/skybox/skybox.frag", VK_SHADER_STAGE_FRAGMENT_BIT}
 				});
 			// skyboxes don't care about depth testing / writing
 			skyboxMat.pipelineBuilder->depthStencil.depthWriteEnable = false;
 			skyboxMat.pipelineBuilder->depthStencil.depthTestEnable = false;
+			skyboxMat.pipelineBuilder->rasterizer.frontFace = VK_FRONT_FACE_CLOCKWISE;
 			skyboxMat.createPipeline();
 
 			// create skybox material instance
@@ -246,35 +213,17 @@ public:
 		// blit
 		{
 			blitMat = Material(globalDSetLayout, blitPass->pass, blitPass->inputLayout, {
-				{"res/shaders/post/vert.spv", VK_SHADER_STAGE_VERTEX_BIT},
-				{"res/shaders/post/frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT}
+				{"res/shaders/post/post.vert", VK_SHADER_STAGE_VERTEX_BIT},
+				{"res/shaders/post/post.frag", VK_SHADER_STAGE_FRAGMENT_BIT}
 				});
 			blitMat.createPipeline();
 			blitMatInstance = MaterialInstance(&blitMat, this->descriptorPool);
 		}
-		// blur X
-		{
-			blurXMat = Material(globalDSetLayout, blurXPass->pass, blurXPass->inputLayout, {
-				{"res/shaders/post/vert.spv", VK_SHADER_STAGE_VERTEX_BIT},
-				{"res/shaders/blurX/frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT}
-				});
-			blurXMat.createPipeline();
-			blurXMatInstance = MaterialInstance(&blurXMat, this->descriptorPool);
-		}
-		// blur Y
-		{
-			blurYMat = Material(globalDSetLayout, blurYPass->pass, blurYPass->inputLayout, {
-				{"res/shaders/post/vert.spv", VK_SHADER_STAGE_VERTEX_BIT},
-				{"res/shaders/blurY/frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT}
-				});
-			blurYMat.createPipeline();
-			blurYMatInstance = MaterialInstance(&blurYMat, this->descriptorPool);
-		}
 		// box
 		{
 			boxMat = Material(globalDSetLayout, mainPass->pass, mainPass->inputLayout, {
-				{"res/shaders/box/vert.spv", VK_SHADER_STAGE_VERTEX_BIT},
-				{"res/shaders/box/frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT}
+				{"res/shaders/box/box.vert", VK_SHADER_STAGE_VERTEX_BIT},
+				{"res/shaders/box/box.frag", VK_SHADER_STAGE_FRAGMENT_BIT}
 				});
 			boxMat.createPipeline();
 			boxMatInstance = MaterialInstance(&boxMat, this->descriptorPool);
@@ -420,8 +369,6 @@ public:
 		
 		skyboxMat.destroy(descriptorPool);
 		blitMat.destroy(descriptorPool);
-		blurXMat.destroy(descriptorPool);
-		blurYMat.destroy(descriptorPool);
 		boxMat.destroy(descriptorPool);
 		destroyImage(vku::state::device, cubeMap);
 		

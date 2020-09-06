@@ -67,6 +67,9 @@
     <ClInclude Include="Vku.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="shadercomp.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <Image Include="D:\Downloads\statue.jpg">

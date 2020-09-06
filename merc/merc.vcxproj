@@ -104,7 +104,7 @@
     </ClCompile>
     <Link>
       <AdditionalLibraryDirectories>C:\VulkanSDK\1.2.141.2\Lib;D:\OpenGLStuff\Lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-      <AdditionalDependencies>vulkan-1.lib;glfw3.lib;spirv-cross-glsl.lib;glslang.lib;SPIRV.lib;spirv-cross-cpp.lib;spirv-cross-core.lib;spirv-cross-reflect.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>vulkan-1.lib;glfw3.lib;spirv-cross-glsl.lib;shaderc_combined.lib;SPIRV.lib;spirv-cross-cpp.lib;spirv-cross-core.lib;spirv-cross-reflect.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <SubSystem>Console</SubSystem>
       <IgnoreAllDefaultLibraries>
       </IgnoreAllDefaultLibraries>
@@ -148,7 +148,7 @@
     </ClCompile>
     <Link>
       <AdditionalLibraryDirectories>C:\VulkanSDK\1.2.141.2\Lib;D:\OpenGLStuff\Lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-      <AdditionalDependencies>vulkan-1.lib;glfw3.lib;spirv-cross-glsl.lib;glslang.lib;SPIRV.lib;spirv-cross-cpp.lib;spirv-cross-core.lib;spirv-cross-reflect.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>vulkan-1.lib;glfw3.lib;spirv-cross-glsl.lib;shaderc_combined.lib;SPIRV.lib;spirv-cross-cpp.lib;spirv-cross-core.lib;spirv-cross-reflect.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <SubSystem>Console</SubSystem>
       <IgnoreAllDefaultLibraries>
       </IgnoreAllDefaultLibraries>
@@ -269,6 +269,7 @@
     <ClInclude Include="NewDemo.hpp" />
     <ClInclude Include="rgraph.h" />
     <ClInclude Include="sgraph.h" />
+    <ClInclude Include="shadercomp.h" />
     <ClInclude Include="VulkanDemo.hpp">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>

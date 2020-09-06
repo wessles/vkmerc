@@ -339,11 +339,11 @@ namespace vku::support {
 
 
 namespace vku::create {
-	VkShaderModule createShaderModule(const std::vector<char>& code) {
+	VkShaderModule createShaderModule(const std::vector<uint32_t>& code) {
 		VkShaderModuleCreateInfo createInfo{};
 		createInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-		createInfo.codeSize = code.size();
-		createInfo.pCode = reinterpret_cast<const uint32_t*>(code.data());
+		createInfo.codeSize = code.size() * sizeof(uint32_t);
+		createInfo.pCode = code.data();
 
 		VkShaderModule shaderModule;
 		VkResult result = vkCreateShaderModule(state::device, &createInfo, nullptr, &shaderModule);
@@ -582,18 +582,18 @@ namespace vku::mesh {
 			{{1, 1, 1}, {}, {}, {-1, -1, -1}},
 		},
 		{
-			0, 3, 2,
-			0, 1, 3,
-			1, 5, 7,
-			1, 7, 3,
-			4, 7, 5,
-			4, 6, 7,
-			4, 2, 6,
-			4, 0, 2,
-			6, 2, 7,
-			2, 3, 7,
-			1, 4, 5,
-			0, 4, 1
+			0, 2, 3,
+			0, 3, 1,
+			1, 7, 5,
+			1, 3, 7,
+			4, 5, 7,
+			4, 7, 6,
+			4, 6, 2,
+			4, 2, 0,
+			6, 7, 2,
+			2, 7, 3,
+			1, 5, 4,
+			0, 1, 4
 		}
 	};
 	MeshData blit = {
@@ -992,7 +992,24 @@ namespace vku::image {
 }
 
 namespace vku::io {
-	std::vector<char> readFile(const std::string& filename) {
+	std::vector<uint32_t> readFileIntVec(const std::string& filename) {
+		std::ifstream file(filename, std::ios::ate | std::ios::binary);
+
+		if (!file.is_open()) {
+			throw std::runtime_error("Failed to open file!");
+		}
+
+		size_t fileSize = (size_t)file.tellg();
+		std::vector<uint32_t> buffer(fileSize / sizeof(uint32_t), 0);
+
+		file.seekg(0);
+		file.read((char*)buffer.data(), fileSize);
+
+		file.close();
+
+		return buffer;
+	}
+	std::vector<char> readFileCharVec(const std::string& filename) {
 		std::ifstream file(filename, std::ios::ate | std::ios::binary);
 
 		if (!file.is_open()) {
@@ -1003,7 +1020,7 @@ namespace vku::io {
 		std::vector<char> buffer(fileSize);
 
 		file.seekg(0);
-		file.read(buffer.data(), fileSize);
+		file.read((char*)buffer.data(), fileSize);
 
 		file.close();
 

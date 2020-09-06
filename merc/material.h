@@ -4,6 +4,7 @@
 #include <spirv_cross/spirv_glsl.hpp>
 
 #include "Vku.hpp"
+#include "shadercomp.h"
 
 using namespace vku::mesh;
 using namespace vku::image;
@@ -155,13 +156,18 @@ namespace vku::material {
 
 			// load shaders into the pipeline state, and analyze shader for expected descriptors
 			for (const ShaderInfo &info : shaderStageInfo) {
-				std::vector<char> fileData = vku::io::readFile(info.filename);
+				std::vector<uint32_t> fileData = vku::shadercomp::lazyLoadSpirv(info.filename);
 
-				// FIRST: use reflection to enumerate the inputs of this shader
+				// now compile the actual shader
+				VkShaderModule sModule = vku::create::createShaderModule(fileData);
+				VkPipelineShaderStageCreateInfo stage = vku::create::createShaderStage(sModule, info.stage);
+				shaderModules.push_back(sModule);
+				shaderStages.push_back(stage);
+
+				// use reflection to enumerate the inputs of this shader
 				{
 					// convert from char vector to uint32_t vector, then reflect
-					std::vector<uint32_t> spv(fileData.size() / sizeof(uint32_t));
-					memcpy(spv.data(), fileData.data(), fileData.size());
+					std::vector<uint32_t> spv(fileData.cbegin(), fileData.cend());
 					spirv_cross::CompilerGLSL glsl(std::move(spv));
 					spirv_cross::ShaderResources resources = glsl.get_shader_resources();
 
@@ -173,11 +179,6 @@ namespace vku::material {
 							reflDescriptors.push_back({ VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_ALL_GRAPHICS });
 					}
 				}
-
-				VkShaderModule sModule = vku::create::createShaderModule(vku::io::readFile(info.filename));
-				VkPipelineShaderStageCreateInfo stage = vku::create::createShaderStage(sModule, info.stage);
-				shaderModules.push_back(sModule);
-				shaderStages.push_back(stage);
 			}
 			pipelineBuilder->pipelineInfo.stageCount = static_cast<uint32_t>(shaderStages.size());
 			pipelineBuilder->pipelineInfo.pStages = shaderStages.data();
