@@ -14,7 +14,7 @@ using namespace vku::image;
 
 namespace vku::rgraph {
 	struct REdgeInstance {
-		Image image;
+		Texture texture;
 	};
 
 	struct RNodeInstance {
@@ -85,8 +85,12 @@ namespace vku::rgraph {
 			edge->to = to;
 			if (edge->from != nullptr)
 				edge->from->out.push_back(edge);
-			for (RNode *node : edge->to) {
-				node->in.push_back(edge);
+
+			bool isTransient = edge->to.size() == 1 && edge->to[0] == nullptr;
+			if (!isTransient) {
+				for (RNode *node : edge->to) {
+					node->in.push_back(edge);
+				}
 			}
 			edges.push_back(edge);
 			return edge;
@@ -290,24 +294,34 @@ namespace vku::rgraph {
 						bool isDepth = edge->format == vku::state::depthFormat;
 
 						// alias for brevity
-						Image &image = edge->instances[i].image;
+						Texture &texture = edge->instances[i].texture;
+						Image &image = texture.image;
 
-						VkImageUsageFlagBits usage;
-						VkImageAspectFlagBits aspect;
+						VkImageUsageFlags usage;
+						VkImageAspectFlags aspect;
 						if (isDepth) {
 							usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
 							aspect = VK_IMAGE_ASPECT_DEPTH_BIT;
-						}
-						else {
+						} else {
 							usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
 							aspect = VK_IMAGE_ASPECT_COLOR_BIT;
 						}
+
+						// transient means that the data never leaves the GPU (like a depth buffer)
+						// indicated in graph by edge going to "nullptr"
+						bool isTransient = edge->to.size() == 1 && edge->to[0] == nullptr;
+						if(isTransient)
+							usage |= VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT;
+
+						bool isInput = edge->to.size() > 0 && !isTransient;
+						if (isInput)
+							usage |= VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
 
 						createImage(
 							screen.width, screen.height, 1,
 							edge->samples, edge->format,
 							VK_IMAGE_TILING_OPTIMAL,
-							VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | usage,
+							usage,
 							VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, image.handle, image.memory);
 						image.view = createImageView(image.handle, edge->format, aspect, 1);
 						if (isDepth) {
@@ -318,7 +332,7 @@ namespace vku::rgraph {
 						samplerCI.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
 						samplerCI.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
 						
-						if (vkCreateSampler(vku::state::device, &samplerCI, nullptr, &image.sampler) != VK_SUCCESS) {
+						if (vkCreateSampler(vku::state::device, &samplerCI, nullptr, &texture.sampler) != VK_SUCCESS) {
 							throw std::runtime_error("Failed to create attachment sampler!");
 						}
 					}
@@ -350,14 +364,14 @@ namespace vku::rgraph {
 							std::vector<VkImageView> attachmentImageViews;
 
 							for (auto &edge : current.in) {
-								attachmentImageViews.push_back(edge->instances[i].image.view);
+								attachmentImageViews.push_back(edge->instances[i].texture.image.view);
 							}
 							if (isEnd) {
 								attachmentImageViews.push_back(vku::state::swapChainImageViews[i]);
 							}
 							else {
 								for (auto &edge : current.out) {
-									attachmentImageViews.push_back(edge->instances[i].image.view);
+									attachmentImageViews.push_back(edge->instances[i].texture.image.view);
 								}
 							}
 
@@ -382,6 +396,9 @@ namespace vku::rgraph {
 				for (REdge *edge : this->edges) {
 					if (edge->to.size() == 0) continue;
 
+					bool isTransient = edge->to.size() == 1 && edge->to[0] == nullptr;
+					if (isTransient) continue;
+
 					for (RNode *node : edge->to) {
 						int bindingIndex = -1;
 						for (int k = 0; k < node->in.size(); k++) {
@@ -394,7 +411,7 @@ namespace vku::rgraph {
 							throw std::runtime_error("Binding index for an edge could not be found in target node.");
 						}
 
-						VkWriteDescriptorSet setWrite = edge->instances[i].image.getDescriptorWrite(bindingIndex, node->instances[i].descriptorSet);
+						VkWriteDescriptorSet setWrite = edge->instances[i].texture.getDescriptorWrite(bindingIndex, node->instances[i].descriptorSet);
 						vkUpdateDescriptorSets(vku::state::device, 1, &setWrite, 0, nullptr);
 					}
 				}
@@ -411,7 +428,7 @@ namespace vku::rgraph {
 			}
 			for (REdge* edge : edges) {
 				for (int i = 0; i < vku::state::SWAPCHAIN_SIZE; i++) {
-					vku::image::destroyImage(vku::state::device, edge->instances[i].image);
+					vku::image::destroyTexture(vku::state::device, edge->instances[i].texture);
 				}
 			}
 

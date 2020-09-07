@@ -215,6 +215,10 @@ namespace vku::material {
 			delete pipelineBuilder;
 		}
 
+		void bind(VkCommandBuffer cb) {
+			vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
+		}
+
 		void destroy(VkDescriptorPool &descriptorPool) {
 			for (auto &sMod : shaderModules) {
 				vkDestroyShaderModule(vku::state::device, sMod, nullptr);
@@ -227,11 +231,11 @@ namespace vku::material {
 	};
 
 	struct MaterialInstance {
-		const Material *material;
+		Material *material;
 
 		std::array<VkDescriptorSet, 3> descriptorSets;
 
-		MaterialInstance(const Material *mat, VkDescriptorPool &descriptorPool) {
+		MaterialInstance(Material *mat, VkDescriptorPool &descriptorPool) {
 			this->material = mat;
 
 			VkDescriptorSetLayout dSetLayout = this->material->descriptorSetLayout;
@@ -250,11 +254,15 @@ namespace vku::material {
 
 		MaterialInstance() {}
 
-		void write(int id, Image &image) {
+		void write(int id, Texture &texture) {
 			for (size_t i = 0; i < vku::state::SWAPCHAIN_SIZE; i++) {
-				VkWriteDescriptorSet setWrite = image.getDescriptorWrite(id, descriptorSets[i]);
+				VkWriteDescriptorSet setWrite = texture.getDescriptorWrite(id, descriptorSets[i]);
 				vkUpdateDescriptorSets(vku::state::device, 1, &setWrite, 0, nullptr);
 			}
+		}
+
+		void bind(VkCommandBuffer cb, uint32_t i) {
+			vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, material->pipelineLayout, 2, 1, &descriptorSets[i], 0, nullptr);
 		}
 	};
 }

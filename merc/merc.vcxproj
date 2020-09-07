@@ -265,6 +265,7 @@
     <ClCompile Include="FlyCam.cpp" />
     <ClCompile Include="Main.cpp" />
     <ClInclude Include="Demo.hpp" />
+    <ClInclude Include="gltfload.h" />
     <ClInclude Include="material.h" />
     <ClInclude Include="NewDemo.hpp" />
     <ClInclude Include="rgraph.h" />

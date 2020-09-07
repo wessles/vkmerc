@@ -5,15 +5,19 @@
 #include <GLFW/glfw3.h>
 
 #define GLM_FORCE_RADIANS
-#define GLM_FORCE_DEPTH_ZERO_TO_ONE // for overriding opengl defaults
+#define GLM_FORCE_DEPTH_ZERO_TO_ONE
 #include <glm/glm.hpp>
 
 #define GLM_ENABLE_EXPERIMENTAL
 #include <glm/gtx/hash.hpp>
 
+#define STBI_MSC_SECURE_CRT
 #define STB_IMAGE_IMPLEMENTATION
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#define TINYGLTF_IMPLEMENTATION
+#include "tiny_gltf.h"
+
 #define TINYOBJLOADER_IMPLEMENTATION
-#include "stb_image.h"
 #include "tiny_obj_loader.h"
 
 #include <functional>
@@ -618,8 +622,12 @@ namespace vku::image {
 		VkImage handle;
 		VkDeviceMemory memory;
 		VkImageView view;
-		VkSampler sampler;
 		uint32_t mipLevels = 1;
+	};
+
+	struct Texture {
+		Image image;
+		VkSampler sampler;
 
 	private:
 		VkDescriptorImageInfo info;
@@ -627,7 +635,7 @@ namespace vku::image {
 	public:
 		VkWriteDescriptorSet getDescriptorWrite(uint32_t binding, VkDescriptorSet descriptorSet, VkImageLayout layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) {
 			info.imageLayout = layout;
-			info.imageView = view;
+			info.imageView = image.view;
 			info.sampler = sampler;
 
 			VkWriteDescriptorSet descriptorWrite{};
@@ -889,6 +897,19 @@ namespace vku::image {
 
 		return view;
 	}
+	void loadFromBuffer(VkBuffer buffer, uint32_t texWidth, uint32_t texHeight, Image& image) {
+		vku::image::createImage(texWidth, texHeight, image.mipLevels, VK_SAMPLE_COUNT_1_BIT,
+			VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_TILING_OPTIMAL,
+			VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+			VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+			image.handle, image.memory);
+		// transition layout to transfer destination optimized type
+		vku::image::transitionImageLayout(image.handle, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, image.mipLevels);
+		// copy data to image
+		vku::image::copyBufferToImage(buffer, image.handle, static_cast<uint32_t>(texWidth), static_cast<uint32_t>(texHeight));
+		// transition layout to readonly shader data, and generate mip maps (even if it's just one)
+		vku::image::generateMipmaps(image.handle, VK_FORMAT_R8G8B8A8_SRGB, texWidth, texHeight, image.mipLevels);
+	}
 	void loadTexture(const std::string& path, Image& image) {
 		int texWidth, texHeight, texChannels;
 		stbi_uc* pixels = stbi_load(path.c_str(), &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
@@ -914,18 +935,7 @@ namespace vku::image {
 
 		stbi_image_free(pixels);
 
-		vku::image::createImage(texWidth, texHeight, image.mipLevels, VK_SAMPLE_COUNT_1_BIT,
-			VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_TILING_OPTIMAL,
-			VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
-			VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-			image.handle, image.memory);
-		// transition layout to transfer destination optimized type
-		vku::image::transitionImageLayout(image.handle, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, image.mipLevels);
-		// copy data to image
-		vku::image::copyBufferToImage(stagingBuffer, image.handle, static_cast<uint32_t>(texWidth), static_cast<uint32_t>(texHeight));
-		// transition layout to readonly shader data, and generate mip maps (even if it's just one)
-		vku::image::generateMipmaps(image.handle, VK_FORMAT_R8G8B8A8_SRGB, texWidth, texHeight, image.mipLevels);
-
+		loadFromBuffer(stagingBuffer, texWidth, texHeight, image);
 
 		vkDestroyBuffer(state::device, stagingBuffer, nullptr);
 		vkFreeMemory(state::device, stagingBufferMemory, nullptr);
@@ -984,10 +994,13 @@ namespace vku::image {
 
 	}
 	void destroyImage(const VkDevice& device, Image& image) {
-		vkDestroySampler(device, image.sampler, nullptr);
 		vkDestroyImageView(device, image.view, nullptr);
 		vkDestroyImage(device, image.handle, nullptr);
 		vkFreeMemory(device, image.memory, nullptr);
+	}
+	void destroyTexture(const VkDevice& device, Texture& texture) {
+		vkDestroySampler(device, texture.sampler, nullptr);
+		destroyImage(device, texture.image);
 	}
 }
 

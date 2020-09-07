@@ -17,6 +17,9 @@ using namespace vku::material;
 using namespace vku::image;
 using namespace vku::mesh;
 
+#include "gltfload.h"
+
+
 
 template<class UniformStructType>
 class UniformBuffer {
@@ -87,7 +90,9 @@ class Demo : public Engine {
 	std::array<VkCommandBuffer, 3> commandBuffers;
 	UniformBuffer<GlobalUniform> globalUniforms;
 
-	Image cubeMap;
+	vku::gltf::GltfModel gltfModel;
+
+	Texture cubeMap;
 
 	MeshBuffer boxMeshBuf;
 	Material skyboxMat;
@@ -114,8 +119,6 @@ public:
 
 		flycam = FlyCam(vku::state::windowHandle);
 
-		loadMeshes();
-
 		buildRenderGraph();
 
 		buildSwapchainDependants();
@@ -124,6 +127,7 @@ public:
 	void loadMeshes() {
 		boxMeshBuf.load(box);
 		blitMeshBuf.load(blit);
+		gltfModel = vku::gltf::GltfModel("res/demo/DamagedHelmet.glb", globalDSetLayout, mainPass, descriptorPool);
 	}
 
 	void buildRenderGraph() {
@@ -136,9 +140,7 @@ public:
 			vkCmdBindIndexBuffer(cb, boxMeshBuf.iBuffer, 0, VK_INDEX_TYPE_UINT32);
 			vkCmdDrawIndexed(cb, boxMeshBuf.indicesSize, 1, 0, 0, 0);
 
-			vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, boxMat.pipeline);
-			vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, boxMat.pipelineLayout, 2, 1, &boxMatInstance.descriptorSets[i], 0, nullptr);
-			vkCmdDrawIndexed(cb, boxMeshBuf.indicesSize, 1, 0, 0, 0);
+			gltfModel.draw(cb, i);
 		});
 		blitPass = graph.addPass([&](uint32_t i, VkCommandBuffer cb) {
 			VkDeviceSize offsets[] = { 0 };
@@ -156,6 +158,10 @@ public:
 		REdge *color = graph.addAttachment(mainPass, { blitPass });
 		color->format = vku::state::screenFormat;
 		color->samples = VK_SAMPLE_COUNT_1_BIT;
+
+		REdge *depth = graph.addAttachment(mainPass, { nullptr });
+		depth->format = vku::state::depthFormat;
+		depth->samples = VK_SAMPLE_COUNT_1_BIT;
 
 		REdge *output = graph.addAttachment(blitPass, {});
 		output->format = vku::state::screenFormat;
@@ -202,8 +208,8 @@ public:
 				"res/cubemap/negy.jpg",
 				"res/cubemap/posz.jpg",
 				"res/cubemap/negz.jpg",
-				}, cubeMap);
-			cubeMap.view = createImageView(cubeMap.handle, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_ASPECT_COLOR_BIT, cubeMap.mipLevels, VK_IMAGE_VIEW_TYPE_CUBE, 6);
+				}, cubeMap.image);
+			cubeMap.image.view = createImageView(cubeMap.image.handle, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_ASPECT_COLOR_BIT, cubeMap.image.mipLevels, VK_IMAGE_VIEW_TYPE_CUBE, 6);
 			VkSamplerCreateInfo samplerCI = vku::create::createSamplerCI();
 			if (vkCreateSampler(vku::state::device, &samplerCI, nullptr, &cubeMap.sampler) != VK_SUCCESS) {
 				throw std::runtime_error("Failed to create texture sampler!");
@@ -360,6 +366,9 @@ public:
 		createDescriptorSets();
 
 		graph.process(globalDSetLayout, descriptorPool);
+		
+		loadMeshes();
+
 		createMaterials();
 		createCommandBuffers();
 	}
@@ -370,7 +379,9 @@ public:
 		skyboxMat.destroy(descriptorPool);
 		blitMat.destroy(descriptorPool);
 		boxMat.destroy(descriptorPool);
-		destroyImage(vku::state::device, cubeMap);
+		destroyTexture(vku::state::device, cubeMap);
+
+		gltfModel.destroy(descriptorPool);
 		
 		graph.destroy(descriptorPool);
 
