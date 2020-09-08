@@ -21,6 +21,9 @@
     <ClCompile Include="Main.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="mikktspace.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <None Include="compile_shaders.bat">
@@ -71,6 +74,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="gltfload.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="mikktspace.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>

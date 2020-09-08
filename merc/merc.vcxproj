@@ -264,9 +264,11 @@
   <ItemGroup>
     <ClCompile Include="FlyCam.cpp" />
     <ClCompile Include="Main.cpp" />
+    <ClCompile Include="mikktspace.c" />
     <ClInclude Include="Demo.hpp" />
     <ClInclude Include="gltfload.h" />
     <ClInclude Include="material.h" />
+    <ClInclude Include="mikktspace.h" />
     <ClInclude Include="NewDemo.hpp" />
     <ClInclude Include="rgraph.h" />
     <ClInclude Include="sgraph.h" />

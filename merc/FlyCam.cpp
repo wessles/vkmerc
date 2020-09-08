@@ -37,7 +37,7 @@ void FlyCam::update() {
 	wasPressingEscape = escape;
 
 	glm::vec4 accel = { 0, 0, 0, 0 };
-	float thrust = ctrl ? 0.01f : 0.001f;
+	float thrust = ctrl ? 0.01f : 0.005f;
 
 	if (w) accel.z -= thrust;
 	if (a) accel.x -= thrust;
@@ -47,9 +47,11 @@ void FlyCam::update() {
 	glm::mat4 transform = getTransform();
 	// orient acceleration to transform
 	accel = transform * accel;
+	// project WASD movement onto the xz plane
+	accel.y = 0;
 
-	if (space) accel.y += thrust;
-	if (shift) accel.y -= thrust;
+	if (space) accel.y += 0.005f;
+	if (shift) accel.y -= 0.005f;
 
 	velocity += accel;
 	velocity = glm::vec4(0.9f) * velocity;

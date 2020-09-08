@@ -507,6 +507,7 @@ namespace vku::mesh {
 		glm::vec3 color;
 		glm::vec2 texCoord;
 		glm::vec3 normal;
+		glm::vec4 tangent;
 		static VkVertexInputBindingDescription getBindingDescription() {
 			VkVertexInputBindingDescription bindingDescription{};
 
@@ -518,7 +519,7 @@ namespace vku::mesh {
 		}
 		static std::vector<VkVertexInputAttributeDescription> getAttributeDescriptions() {
 			std::vector<VkVertexInputAttributeDescription> attributeDescriptions{};
-			attributeDescriptions.resize(4);
+			attributeDescriptions.resize(5);
 
 			// vertex position attribute (vec3)
 			attributeDescriptions[0].binding = 0;
@@ -542,10 +543,15 @@ namespace vku::mesh {
 			attributeDescriptions[3].format = VK_FORMAT_R32G32B32_SFLOAT;
 			attributeDescriptions[3].offset = offsetof(Vertex, normal);
 
+			attributeDescriptions[4].binding = 0;
+			attributeDescriptions[4].location = 4;
+			attributeDescriptions[4].format = VK_FORMAT_R32G32B32A32_SFLOAT;
+			attributeDescriptions[4].offset = offsetof(Vertex, tangent);
+
 			return attributeDescriptions;
 		}
 		bool operator==(const Vertex& other) const {
-			return pos == other.pos && color == other.color && texCoord == other.texCoord && normal == other.normal;
+			return pos == other.pos && color == other.color && texCoord == other.texCoord && normal == other.normal && tangent == other.tangent;
 		}
 	};
 

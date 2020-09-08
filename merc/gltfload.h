@@ -3,6 +3,8 @@
 #include <string>
 #include <glm/gtc/type_ptr.hpp>
 
+#include "mikktspace.h"
+
 #include "Vku.hpp"
 
 
@@ -14,6 +16,76 @@ using namespace vku::mesh;
 */
 
 namespace vku::gltf {
+	struct MikktCalculator {
+		void generateTangentSpace(MeshData *model) {
+			SMikkTSpaceInterface iMikkt;
+			iMikkt.m_getNumFaces = getNumFaces;
+			iMikkt.m_getNumVerticesOfFace = getNumVerticesOfFace;
+			iMikkt.m_getPosition = getPosition;
+			iMikkt.m_getNormal = getNormal;
+			iMikkt.m_getTexCoord = getTexCoord;
+			iMikkt.m_setTSpaceBasic = setTSpaceBasic;
+			iMikkt.m_setTSpace = nullptr;
+
+			SMikkTSpaceContext context;
+			context.m_pInterface = &iMikkt;
+			context.m_pUserData = model;
+
+			genTangSpaceDefault(&context);
+		}
+
+		// Return primitive count
+		static int  getNumFaces(const SMikkTSpaceContext *context) {
+			MeshData *mesh = static_cast<MeshData*>(context->m_pUserData);
+
+			return mesh->indices.size() / 3;
+		}
+
+		// Return number of vertices in the primitive given by index.
+		static int  getNumVerticesOfFace(const SMikkTSpaceContext *context, const int primnum) {
+			return 3;
+		}
+
+		// Write 3-float position of the vertex's point.
+		static void getPosition(const SMikkTSpaceContext *context, float pos[], const int primnum, const int vtxnum) {
+			MeshData *mesh = static_cast<MeshData*>(context->m_pUserData);
+
+			glm::vec3 &v = mesh->vertices[mesh->indices[primnum * 3 + vtxnum]].pos;
+			pos[0] = v[0];
+			pos[1] = v[1];
+			pos[2] = v[2];
+		}
+
+		// Write 3-float vertex normal.
+		static void getNormal(const SMikkTSpaceContext *context, float normal[], const int primnum, const int vtxnum) {
+			MeshData *mesh = static_cast<MeshData*>(context->m_pUserData);
+
+			glm::vec3 &n = mesh->vertices[mesh->indices[primnum * 3 + vtxnum]].normal;
+			normal[0] = n[0];
+			normal[1] = n[1];
+			normal[2] = n[2];
+		}
+
+		// Write 2-float vertex uv.
+		static void getTexCoord(const SMikkTSpaceContext *context, float uv[], const int primnum, const int vtxnum) {
+			MeshData *mesh = static_cast<MeshData*>(context->m_pUserData);
+
+			glm::vec2 &tc = mesh->vertices[mesh->indices[primnum * 3 + vtxnum]].texCoord;
+			uv[0] = tc[0];
+			uv[1] = tc[1];
+		}
+
+		// Compute and set attributes on the geometry vertex.
+		static void setTSpaceBasic(const SMikkTSpaceContext *context, const float tangentu[], const float sign, const int primnum, const int vtxnum) {
+			MeshData *mesh = static_cast<MeshData*>(context->m_pUserData);
+			
+			Vertex &v = mesh->vertices[mesh->indices[primnum * 3 + vtxnum]];
+			v.tangent = glm::vec4(tangentu[0], tangentu[1], tangentu[2], sign);
+		}
+
+		static void setTSpace(const SMikkTSpaceContext *context, const float tangentu[], const float tangentv[], const float magu, const float magv, const tbool keep, const int primnum, const int vtxnum);
+
+	};
 	struct GltfModel {
 		// A primitive contains the data for a single draw call
 		struct Primitive {
@@ -71,9 +143,15 @@ namespace vku::gltf {
 
 			MeshData meshData;
 
-			for (tinygltf::Node &gNode : model.nodes) {
+			
+			for (uint32_t i = 0; i < model.nodes.size(); i++) {
+				tinygltf::Node &gNode = model.nodes[i];
 				loadNode(gNode, model, nullptr, meshData.indices, meshData.vertices);
+				Node &node = nodes[i];
 			}
+
+			MikktCalculator mikkt;
+			mikkt.generateTangentSpace(&meshData);
 
 			meshBuf.load(meshData);
 		}
@@ -198,8 +276,10 @@ namespace vku::gltf {
 				material.createPipeline();
 
 				materialInstance = MaterialInstance(&material, descriptorPool);
-				Texture colorTexture = textures[gMaterial.pbrMetallicRoughness.baseColorTexture.index];
+				Texture &colorTexture = textures[gMaterial.pbrMetallicRoughness.baseColorTexture.index];
 				materialInstance.write(0, colorTexture);
+				Texture &normalTexture = textures[gMaterial.normalTexture.index];
+				materialInstance.write(1, normalTexture);
 			}
 		}
 
@@ -238,6 +318,7 @@ namespace vku::gltf {
 					{
 						const float* positionBuffer = nullptr;
 						const float* normalsBuffer = nullptr;
+						const float* tangentsBuffer = nullptr;
 						const float* texCoordsBuffer = nullptr;
 						size_t vertexCount = 0;
 
@@ -252,6 +333,11 @@ namespace vku::gltf {
 							const tinygltf::BufferView& view = model.bufferViews[accessor.bufferView];
 							normalsBuffer = reinterpret_cast<const float*>(&(model.buffers[view.buffer].data[accessor.byteOffset + view.byteOffset]));
 						}
+						if (gPrimitive.attributes.find("TANGENT") != gPrimitive.attributes.end()) {
+							const tinygltf::Accessor& accessor = model.accessors[gPrimitive.attributes.find("TANGENT")->second];
+							const tinygltf::BufferView& view = model.bufferViews[accessor.bufferView];
+							tangentsBuffer = reinterpret_cast<const float*>(&(model.buffers[view.buffer].data[accessor.byteOffset + view.byteOffset]));
+						}
 						if (gPrimitive.attributes.find("TEXCOORD_0") != gPrimitive.attributes.end()) {
 							const tinygltf::Accessor& accessor = model.accessors[gPrimitive.attributes.find("TEXCOORD_0")->second];
 							const tinygltf::BufferView& view = model.bufferViews[accessor.bufferView];
@@ -262,6 +348,7 @@ namespace vku::gltf {
 							Vertex vert{};
 							vert.pos = glm::vec4(glm::make_vec3(&positionBuffer[v * 3]), 1.0f);
 							vert.normal = glm::normalize(glm::vec3(normalsBuffer ? glm::make_vec3(&normalsBuffer[v * 3]) : glm::vec3(0.0f)));
+							vert.tangent = tangentsBuffer ? glm::make_vec4(&tangentsBuffer[v * 4]) : glm::vec4(0.0f);
 							vert.texCoord = texCoordsBuffer ? glm::make_vec2(&texCoordsBuffer[v * 2]) : glm::vec3(0.0f);
 							vert.color = glm::vec3(1.0f);
 							vertexBuffer.push_back(vert);
@@ -325,19 +412,21 @@ namespace vku::gltf {
 			if (node.mesh.primitives.size() > 0) {
 				// Pass the node's matrix via push constants
 				// Traverse the node hierarchy to the top-most parent to get the final matrix of the current node
-				//glm::mat4 nodeMatrix = node.matrix;
-				//VulkanglTFModel::Node* currentParent = node.parent;
-				//while (currentParent) {
-				//	nodeMatrix = currentParent->matrix * nodeMatrix;
-				//	currentParent = currentParent->parent;
-				//}
-				//// Pass the final matrix to the vertex shader using push constants
-				//vkCmdPushConstants(commandBuffer, pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(glm::mat4), &nodeMatrix);
+				glm::mat4 nodeMatrix = node.matrix;
+				Node* currentParent = node.parent;
+				while (currentParent) {
+					nodeMatrix = currentParent->matrix * nodeMatrix;
+					currentParent = currentParent->parent;
+				}
+
 				for (Primitive& primitive : node.mesh.primitives) {
 					if (primitive.indexCount > 0) {
 						MaterialInstance &materialInstance = materialInstances[primitive.materialIndex];
 						materialInstance.material->bind(commandBuffer);
 						materialInstance.bind(commandBuffer, i);
+
+						vkCmdPushConstants(commandBuffer, materialInstance.material->pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(glm::mat4), &nodeMatrix);
+	
 						vkCmdDrawIndexed(commandBuffer, primitive.indexCount, 1, primitive.firstIndex, 0, 0);
 					}
 				}
