@@ -5,6 +5,7 @@ layout(std140, binding = 0) uniform GlobalUniform {
 	mat4 view;
 	mat4 proj;
 	vec4 camPos;
+	vec4 directionalLight;
 	vec2 screenRes;
 	float time;
 } global;
@@ -29,10 +30,10 @@ void main() {
     fragColor = inColor;
     fragTexCoord = inTexCoord;
     
-    fragPosition = (global.view * pc.transform * vec4(inPosition, 1.0)).xyz;
+    fragPosition = (pc.transform * vec4(inPosition, 1.0)).xyz;
 	
     fragNormal = (pc.transform * vec4(inNormal, 0.0)).xyz;
     fragTangent = inTangent.xyzw;
 	
-    gl_Position = global.proj * vec4(fragPosition, 1.0);
+    gl_Position = global.proj * global.view * vec4(fragPosition, 1.0);
 }

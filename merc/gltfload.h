@@ -78,7 +78,7 @@ namespace vku::gltf {
 		// Compute and set attributes on the geometry vertex.
 		static void setTSpaceBasic(const SMikkTSpaceContext *context, const float tangentu[], const float sign, const int primnum, const int vtxnum) {
 			MeshData *mesh = static_cast<MeshData*>(context->m_pUserData);
-			
+
 			Vertex &v = mesh->vertices[mesh->indices[primnum * 3 + vtxnum]];
 			v.tangent = glm::vec4(tangentu[0], tangentu[1], tangentu[2], sign);
 		}
@@ -116,7 +116,9 @@ namespace vku::gltf {
 
 		GltfModel() {}
 
-		GltfModel(const std::string& filename, VkDescriptorSetLayout globalDSetLayout, RNode *pass, VkDescriptorPool descriptorPool) {
+		GltfModel(const std::string& filename, VkDescriptorSetLayout globalDSetLayout,
+			RNode *pass, VkDescriptorPool descriptorPool,
+			Texture &brdf_lut, Texture &diffuse_ibl, Texture &specular_ibl) {
 			tinygltf::Model model;
 
 			tinygltf::TinyGLTF loader;
@@ -138,12 +140,13 @@ namespace vku::gltf {
 				std::cout << "Loaded glTF: " << filename << std::endl;
 
 			loadTextures(model);
-			loadMaterials(globalDSetLayout, pass, descriptorPool, model);
+			loadMaterials(globalDSetLayout, pass, descriptorPool, model,
+				brdf_lut, diffuse_ibl, specular_ibl);
 
 
 			MeshData meshData;
 
-			
+
 			for (uint32_t i = 0; i < model.nodes.size(); i++) {
 				tinygltf::Node &gNode = model.nodes[i];
 				loadNode(gNode, model, nullptr, meshData.indices, meshData.vertices);
@@ -175,7 +178,8 @@ namespace vku::gltf {
 					rgb += 3;
 				}
 				deleteBuffer = true;
-			} else {
+			}
+			else {
 				buffer = &gImage.image[0];
 				bufferSize = gImage.image.size();
 			}
@@ -201,7 +205,7 @@ namespace vku::gltf {
 
 				image.view = vku::image::createImageView(image.handle, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_ASPECT_COLOR_BIT, image.mipLevels);
 			}
-				
+
 			if (deleteBuffer) {
 				delete buffer;
 			}
@@ -210,11 +214,11 @@ namespace vku::gltf {
 		}
 		VkFilter convertTinyGltfFilter(int tinyGltfFilter) {
 			switch (tinyGltfFilter) {
-			case TINYGLTF_TEXTURE_FILTER_LINEAR:
-				return VK_FILTER_LINEAR;
 			case TINYGLTF_TEXTURE_FILTER_NEAREST:
-			default:
 				return VK_FILTER_NEAREST;
+			case TINYGLTF_TEXTURE_FILTER_LINEAR:
+			default:
+				return VK_FILTER_LINEAR;
 			}
 		}
 		VkSamplerAddressMode convertTinyGltfAddressMode(int tinyGltfAddressMode) {
@@ -237,7 +241,7 @@ namespace vku::gltf {
 			// set up min/mag filters
 			samplerCI.minFilter = convertTinyGltfFilter(gSampler.minFilter);
 			samplerCI.magFilter = convertTinyGltfFilter(gSampler.magFilter);
-				
+
 			// set up wraps
 			samplerCI.addressModeU = convertTinyGltfAddressMode(gSampler.wrapR);
 			samplerCI.addressModeV = convertTinyGltfAddressMode(gSampler.wrapS);
@@ -260,7 +264,9 @@ namespace vku::gltf {
 			}
 		}
 
-		void loadMaterials(VkDescriptorSetLayout globalDSetLayout, RNode *pass, VkDescriptorPool descriptorPool, tinygltf::Model &model) {
+		void loadMaterials(VkDescriptorSetLayout globalDSetLayout, RNode *pass,
+			VkDescriptorPool descriptorPool, tinygltf::Model &model,
+			Texture &brdf_lut, Texture &diffuse_ibl, Texture &specular_ibl) {
 			materials.resize(model.materials.size());
 			materialInstances.resize(model.materials.size());
 
@@ -276,10 +282,36 @@ namespace vku::gltf {
 				material.createPipeline();
 
 				materialInstance = MaterialInstance(&material, descriptorPool);
-				Texture &colorTexture = textures[gMaterial.pbrMetallicRoughness.baseColorTexture.index];
-				materialInstance.write(0, colorTexture);
-				Texture &normalTexture = textures[gMaterial.normalTexture.index];
-				materialInstance.write(1, normalTexture);
+
+				int colorTexIdx = gMaterial.pbrMetallicRoughness.baseColorTexture.index;
+				int normalTexIdx = gMaterial.normalTexture.index;
+				int metallicTexIdx = gMaterial.pbrMetallicRoughness.metallicRoughnessTexture.index;
+				int emissiveTexIdx = gMaterial.emissiveTexture.index;
+				int aoTexIdx = gMaterial.occlusionTexture.index;
+
+				if (colorTexIdx > -1) {
+					Texture &colorTexture = textures[colorTexIdx];
+					materialInstance.write(0, colorTexture);
+				}
+				if (normalTexIdx > -1) {
+					Texture &normalTexture = textures[normalTexIdx];
+					materialInstance.write(1, normalTexture);
+				}
+				if (metallicTexIdx > -1) {
+					Texture &metallicTexture = textures[metallicTexIdx];
+					materialInstance.write(2, metallicTexture);
+				}
+				if (emissiveTexIdx > -1) {
+					Texture &emissiveTexture = textures[emissiveTexIdx];
+					materialInstance.write(3, emissiveTexture);
+				}
+				if (aoTexIdx > -1) {
+					Texture &aoTexture = textures[aoTexIdx];
+					materialInstance.write(4, aoTexture);
+				}
+				materialInstance.write(5, specular_ibl);
+				materialInstance.write(6, diffuse_ibl);
+				materialInstance.write(7, brdf_lut);
 			}
 		}
 
@@ -403,7 +435,8 @@ namespace vku::gltf {
 
 			if (parent) {
 				parent->children.push_back(node);
-			} else {
+			}
+			else {
 				nodes.push_back(node);
 			}
 		}
@@ -426,7 +459,7 @@ namespace vku::gltf {
 						materialInstance.bind(commandBuffer, i);
 
 						vkCmdPushConstants(commandBuffer, materialInstance.material->pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(glm::mat4), &nodeMatrix);
-	
+
 						vkCmdDrawIndexed(commandBuffer, primitive.indexCount, 1, primitive.firstIndex, 0, 0);
 					}
 				}

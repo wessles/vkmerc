@@ -18,7 +18,8 @@ using namespace vku::image;
 using namespace vku::mesh;
 
 #include "gltfload.h"
-
+#include "ue4_brdf_table.hpp"
+#include "cubemapgen.hpp"
 
 
 template<class UniformStructType>
@@ -70,12 +71,12 @@ struct GlobalUniform
 	glm::mat4 view;
 	glm::mat4 proj;
 	glm::vec4 camPos;
+	glm::vec4 directionalLight;
 	glm::vec2 screenRes;
 	glm::float32 time;
 };
 
 class Demo : public Engine {
-
 	FlyCam flycam;
 
 	VkDescriptorPool descriptorPool;
@@ -93,6 +94,8 @@ class Demo : public Engine {
 	vku::gltf::GltfModel gltfModel;
 
 	Texture cubeMap;
+	Texture radianceMap;
+	Texture specularMap;
 
 	MeshBuffer boxMeshBuf;
 	Material skyboxMat;
@@ -105,10 +108,12 @@ class Demo : public Engine {
 	Material boxMat;
 	MaterialInstance boxMatInstance;
 
+	UE4BrdfTable brdfGen{};
+
 public:
 	Demo() {
 		this->windowName = "MERC";
-		this->windowSize = { 1280,720 };
+		this->windowSize = { 800,800 };
 	}
 
 	void postInit() {
@@ -121,13 +126,43 @@ public:
 
 		buildRenderGraph();
 
+		globalUniforms.create(sizeof(GlobalUniform));
+		createDescriptorSets();
+
+		graph.processLayouts(globalDSetLayout, descriptorPool);
+
+		loadImages();
+		createMaterials();
+		loadMeshes();
+
 		buildSwapchainDependants();
+	}
+
+	void loadImages() {
+		loadCubemap({
+				"res/cubemap/posx.jpg",
+				"res/cubemap/negx.jpg",
+				"res/cubemap/posy.jpg",
+				"res/cubemap/negy.jpg",
+				"res/cubemap/posz.jpg",
+				"res/cubemap/negz.jpg",
+			}, cubeMap.image);
+		cubeMap.image.view = createImageView(cubeMap.image.handle, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_ASPECT_COLOR_BIT, cubeMap.image.mipLevels, VK_IMAGE_VIEW_TYPE_CUBE, 6);
+		VkSamplerCreateInfo samplerCI = vku::create::createSamplerCI();
+		if (vkCreateSampler(vku::state::device, &samplerCI, nullptr, &cubeMap.sampler) != VK_SUCCESS) {
+			throw std::runtime_error("Failed to create texture sampler!");
+		}
+
+		brdfGen.generateBRDFLUT();
+		specularMap = cubemapgen::generatePrefilteredCube(cubeMap);
+		radianceMap = cubemapgen::generateIrradianceCube(cubeMap);
 	}
 
 	void loadMeshes() {
 		boxMeshBuf.load(box);
 		blitMeshBuf.load(blit);
-		gltfModel = vku::gltf::GltfModel("res/demo/DamagedHelmet.glb", globalDSetLayout, mainPass, descriptorPool);
+		gltfModel = vku::gltf::GltfModel("res/demo/DamagedHelmet.glb", globalDSetLayout, mainPass, descriptorPool,
+			brdfGen.texture, radianceMap, specularMap);
 	}
 
 	void buildRenderGraph() {
@@ -149,6 +184,7 @@ public:
 			vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, blitMat.pipelineLayout, 2, 1, &blitMatInstance.descriptorSets[i], 0, nullptr);
 			vkCmdBindVertexBuffers(cb, 0, 1, &blitMeshBuf.vBuffer, offsets);
 			vkCmdBindIndexBuffer(cb, blitMeshBuf.iBuffer, 0, VK_INDEX_TYPE_UINT32);
+
 			vkCmdDrawIndexed(cb, blitMeshBuf.indicesSize, 1, 0, 0, 0);
 		});
 
@@ -159,6 +195,7 @@ public:
 		color->format = vku::state::screenFormat;
 		color->samples = VK_SAMPLE_COUNT_1_BIT;
 
+		// transient depth texture
 		REdge *depth = graph.addAttachment(mainPass, { nullptr });
 		depth->format = vku::state::depthFormat;
 		depth->samples = VK_SAMPLE_COUNT_1_BIT;
@@ -182,11 +219,13 @@ public:
 		global.camPos = transform * glm::vec4(0.0, 0.0, 0.0, 1.0);
 		global.screenRes = {vku::state::swapChainExtent.width, vku::state::swapChainExtent.height};
 		global.time = time;
+		global.directionalLight = glm::rotate(glm::mat4(1.0), time, glm::vec3(0.0, 1.0, 0.0)) * glm::vec4(1.0, -1.0, 0.0, 0.0);
 
 		globalUniforms.write(i, global);
 	}
 
 	void createMaterials() {
+
 		// skybox
 		{
 			skyboxMat = Material(globalDSetLayout, mainPass->pass, mainPass->inputLayout, {
@@ -201,19 +240,6 @@ public:
 
 			// create skybox material instance
 			skyboxMatInstance = MaterialInstance(&skyboxMat, this->descriptorPool);
-			loadCubemap({
-				"res/cubemap/posx.jpg",
-				"res/cubemap/negx.jpg",
-				"res/cubemap/posy.jpg",
-				"res/cubemap/negy.jpg",
-				"res/cubemap/posz.jpg",
-				"res/cubemap/negz.jpg",
-				}, cubeMap.image);
-			cubeMap.image.view = createImageView(cubeMap.image.handle, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_ASPECT_COLOR_BIT, cubeMap.image.mipLevels, VK_IMAGE_VIEW_TYPE_CUBE, 6);
-			VkSamplerCreateInfo samplerCI = vku::create::createSamplerCI();
-			if (vkCreateSampler(vku::state::device, &samplerCI, nullptr, &cubeMap.sampler) != VK_SUCCESS) {
-				throw std::runtime_error("Failed to create texture sampler!");
-			}
 			skyboxMatInstance.write(0, cubeMap);
 		}
 		// blit
@@ -233,6 +259,8 @@ public:
 				});
 			boxMat.createPipeline();
 			boxMatInstance = MaterialInstance(&boxMat, this->descriptorPool);
+
+			boxMatInstance.write(0, brdfGen.texture);
 		}
 	}
 
@@ -248,6 +276,7 @@ public:
 
 		VkDescriptorPoolCreateInfo poolInfo{};
 		poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+		poolInfo.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
 		poolInfo.poolSizeCount = static_cast<uint32_t>(poolSizes.size());
 		poolInfo.pPoolSizes = poolSizes.data();
 		poolInfo.maxSets = static_cast<uint32_t>(100);
@@ -314,11 +343,30 @@ public:
 		cmdBufInfo.flags = 0; // Optional
 		cmdBufInfo.pInheritanceInfo = nullptr; // Optional
 
+		uint32_t width = vku::state::swapChainExtent.width;
+		uint32_t height = vku::state::swapChainExtent.height;
+
+		VkViewport viewport{};
+		viewport.x = 0.0;
+		viewport.y = 0.0;
+		viewport.width = width;
+		viewport.height = height;
+		viewport.minDepth = 0.0;
+		viewport.maxDepth = 1.0;
+		VkRect2D scissor{};
+		scissor.extent = { width,height };
+		scissor.offset = { 0,0 };
+
 		// record identical command buffers for each swap buffer
 		for (int32_t i = 0; i < commandBuffers.size(); i++) {
 			if (vkBeginCommandBuffer(commandBuffers[i], &cmdBufInfo) != VK_SUCCESS) {
 				throw std::runtime_error("Could not begin command buffer!");
 			}
+
+			// set viewport / scissor before any drawing
+			// this is because materials have dynamic viewport & scissor state by default
+			vkCmdSetViewport(commandBuffers[i], 0, 1, &viewport);
+			vkCmdSetScissor(commandBuffers[i], 0, 1, &scissor);
 
 			vkCmdBindDescriptorSets(commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, globalPipelineLayout, 0, 1, &globalDescriptorSets[i], 0, nullptr);
 
@@ -368,40 +416,38 @@ public:
 	}
 
 	void buildSwapchainDependants() {
-		globalUniforms.create(sizeof(GlobalUniform));
-		createDescriptorSets();
+		graph.processInstances(descriptorPool);
 
-		graph.process(globalDSetLayout, descriptorPool);
-		
-		loadMeshes();
-
-		createMaterials();
 		createCommandBuffers();
 	}
 
 	void destroySwapchainDependents() {
 		vkFreeCommandBuffers(vku::state::device, vku::state::commandPool, static_cast<uint32_t>(commandBuffers.size()), commandBuffers.data());
 		
-		skyboxMat.destroy(descriptorPool);
-		blitMat.destroy(descriptorPool);
-		boxMat.destroy(descriptorPool);
-		destroyTexture(vku::state::device, cubeMap);
-
-		gltfModel.destroy(descriptorPool);
-		
-		graph.destroy(descriptorPool);
-
-		vkDestroyDescriptorPool(vku::state::device, descriptorPool, nullptr);
-
-		globalUniforms.destroy();
+		graph.destroyInstances(descriptorPool);
 	}
 
 	void preCleanup() {
 		destroySwapchainDependents();
 
+		skyboxMat.destroy(descriptorPool);
+		blitMat.destroy(descriptorPool);
+		boxMat.destroy(descriptorPool);
+		gltfModel.destroy(descriptorPool);
+
+		globalUniforms.destroy();
+
+		graph.destroyLayouts();
+
+		destroyTexture(vku::state::device, cubeMap);
+		destroyTexture(vku::state::device, radianceMap);
+		destroyTexture(vku::state::device, specularMap);
+		destroyTexture(vku::state::device, brdfGen.texture);
+
 		boxMeshBuf.destroy();
 		blitMeshBuf.destroy();
-
+		
+		vkDestroyDescriptorPool(vku::state::device, descriptorPool, nullptr);
 		vkDestroyDescriptorSetLayout(vku::state::device, globalDSetLayout, nullptr);
 		vkDestroyPipelineLayout(vku::state::device, globalPipelineLayout, nullptr);
 	}

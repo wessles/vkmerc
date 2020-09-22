@@ -32,6 +32,9 @@ void FlyCam::update() {
 	bool ctrl = glfwGetKey(window, GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS;
 	bool escape = glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS;
 
+	bool minus = glfwGetKey(window, GLFW_KEY_I) == GLFW_PRESS;
+	bool plus = glfwGetKey(window, GLFW_KEY_O) == GLFW_PRESS;
+
 	if (escape && !wasPressingEscape)
 		setGrabbed(!grabbed);
 	wasPressingEscape = escape;
@@ -43,6 +46,13 @@ void FlyCam::update() {
 	if (a) accel.x -= thrust;
 	if (s) accel.z += thrust;
 	if (d) accel.x += thrust;
+
+	if (minus) {
+		FOV += 0.5f;
+	}
+	if (plus) {
+		FOV -= 0.5f;
+	}
 
 	glm::mat4 transform = getTransform();
 	// orient acceleration to transform
@@ -59,7 +69,9 @@ void FlyCam::update() {
 	position += velocity;
 
 	// rotation
-
+	if (!this->grabbed) {
+		return;
+	}
 	int width, height;
 	glfwGetWindowSize(window, &width, &height);
 	double centerX = width / 2, centerY = height / 2;
@@ -101,7 +113,7 @@ glm::mat4 FlyCam::getTransform()
 
 glm::mat4 FlyCam::getProjMatrix(float width, float height, float zMin, float zMax)
 {
-	glm::mat4 proj = glm::perspective(glm::radians(90.0f), width / height, zMin, zMax);
+	glm::mat4 proj = glm::perspective(glm::radians(FOV), width / height, zMin, zMax);
 	//proj = glm::ortho(-2.0f, 2.0f, -2.0f, 2.0f, -30.0f, 30.0f);
 	proj[1][1] *= -1;
 	return proj;

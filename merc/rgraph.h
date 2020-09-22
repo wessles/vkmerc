@@ -96,18 +96,10 @@ namespace vku::rgraph {
 			return edge;
 		}
 
-	private:
-		bool processed = false;
-	public:
-		void process(VkDescriptorSetLayout globalDSet, VkDescriptorPool &pool) {
-			if (processed) {
-				throw std::runtime_error("This render Graph has already been processed!");
-			}
-			processed = true;
-
+		void processLayouts(VkDescriptorSetLayout globalDSet, VkDescriptorPool &pool) {
 			// generate singular resources for nodes (renderpass, descriptor set layout)
 			// as opposed to the duplicated resources we make later (descriptor set, framebuffer)
-			for(RNode *node : nodes){
+			for (RNode *node : nodes) {
 				// generate one render pass for each node
 				{
 					RNode &current = *node;
@@ -136,7 +128,8 @@ namespace vku::rgraph {
 						if (isDepth) {
 							attachment.initialLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
 							attachment.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
-						} else {
+						}
+						else {
 							attachment.initialLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 							attachment.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 						}
@@ -163,7 +156,8 @@ namespace vku::rgraph {
 
 						if (isDepth) {
 							attachment.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
-						} else {
+						}
+						else {
 							attachment.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 						}
 
@@ -181,7 +175,8 @@ namespace vku::rgraph {
 							depthWrite = true;
 							attachments.push_back(attachment);
 							depthOutputRef = { i++, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL };
-						} else {
+						}
+						else {
 							attachments.push_back(attachment);
 							outputRefs.push_back({ i++, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL });
 						}
@@ -190,11 +185,11 @@ namespace vku::rgraph {
 					VkSubpassDescription subpass{};
 					subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
 					subpass.colorAttachmentCount = outputRefs.size();
-					
+
 					subpass.pColorAttachments = outputRefs.data();
 					subpass.inputAttachmentCount = inputRefs.size();
 					subpass.pInputAttachments = inputRefs.data();
-					if(depthWrite)
+					if (depthWrite)
 						subpass.pDepthStencilAttachment = &depthOutputRef;
 
 					std::vector<VkSubpassDependency> dependencies;
@@ -226,7 +221,8 @@ namespace vku::rgraph {
 						dependencies[2].srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
 						dependencies[2].dstAccessMask = VK_ACCESS_MEMORY_READ_BIT;
 						dependencies[2].dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT;
-					} else {
+					}
+					else {
 						dependencies[1].srcSubpass = 0;
 						dependencies[1].dstSubpass = VK_SUBPASS_EXTERNAL;
 						dependencies[1].srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
@@ -285,7 +281,8 @@ namespace vku::rgraph {
 					}
 				}
 			}
-
+		}
+		void processInstances(VkDescriptorPool &pool) {
 			// we need to process multiple instances for each element of the graph
 			// so that we can avoid data hazards in the render loop
 			for(uint32_t i = 0; i < vku::state::SWAPCHAIN_SIZE; i++) {
@@ -343,7 +340,7 @@ namespace vku::rgraph {
 						}
 					}
 				}
-				// (Part II) generate descriptor set/layout and framebuffers
+				// (Part II) allocate descriptor set and framebuffers
 				{
 					for (RNode *node : this->nodes) {
 						RNode &current = *node;
@@ -423,22 +420,27 @@ namespace vku::rgraph {
 				}
 			}
 		}
-		void destroy(VkDescriptorPool &pool) {
+
+		void destroyLayouts() {
 			for (RNode* node : nodes) {
-				for (int i = 0; i < vku::state::SWAPCHAIN_SIZE; i++) {
-					vkDestroyFramebuffer(vku::state::device, node->instances[i].framebuffer, nullptr);
-				}
 				vkDestroyPipelineLayout(vku::state::device, node->pipelineLayout, nullptr);
 				vkDestroyDescriptorSetLayout(vku::state::device, node->inputLayout, nullptr);
 				vkDestroyRenderPass(vku::state::device, node->pass, nullptr);
+			}
+		}
+
+		void destroyInstances(VkDescriptorPool &pool) {
+			for (RNode* node : nodes) {
+				for (int i = 0; i < vku::state::SWAPCHAIN_SIZE; i++) {
+					vkFreeDescriptorSets(vku::state::device, pool, 1, &node->instances[i].descriptorSet);
+					vkDestroyFramebuffer(vku::state::device, node->instances[i].framebuffer, nullptr);
+				}
 			}
 			for (REdge* edge : edges) {
 				for (int i = 0; i < vku::state::SWAPCHAIN_SIZE; i++) {
 					vku::image::destroyTexture(vku::state::device, edge->instances[i].texture);
 				}
 			}
-
-			processed = false;
 		}
 	};
 }

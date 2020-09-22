@@ -10,7 +10,7 @@ private:
 	glm::vec4 position = glm::vec4(0.0, 0.0, 0.0, 1.0);
 	glm::vec4 velocity = glm::vec4(0.0, 0.0, 0.0, 0.0);
 	glm::vec3 rotation = glm::vec3(0.0, 0.0, 0.0);
-	float FOV;
+	float FOV = 90;
 	bool wasPressingEscape = false;
 	bool grabbed = false;
 	double lastMouseX = 0, lastMouseY = 0;

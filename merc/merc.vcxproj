@@ -265,6 +265,7 @@
     <ClCompile Include="FlyCam.cpp" />
     <ClCompile Include="Main.cpp" />
     <ClCompile Include="mikktspace.c" />
+    <ClInclude Include="cubemapgen.hpp" />
     <ClInclude Include="Demo.hpp" />
     <ClInclude Include="gltfload.h" />
     <ClInclude Include="material.h" />
@@ -273,6 +274,10 @@
     <ClInclude Include="rgraph.h" />
     <ClInclude Include="sgraph.h" />
     <ClInclude Include="shadercomp.h" />
+    <ClInclude Include="ue4_brdf_table.hpp" />
+    <ClInclude Include="vku_core.hpp" />
+    <ClInclude Include="vku_image.hpp" />
+    <ClInclude Include="vku_swap.hpp" />
     <ClInclude Include="VulkanDemo.hpp">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>

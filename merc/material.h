@@ -26,6 +26,11 @@ namespace vku::material {
 		VkPipelineDepthStencilStateCreateInfo depthStencil{};
 		VkPipelineMultisampleStateCreateInfo multisampling{};
 		VkPipelineTessellationStateCreateInfo tesselation{};
+		std::vector<VkDynamicState> dynamicStateList{
+			VK_DYNAMIC_STATE_VIEWPORT,
+			VK_DYNAMIC_STATE_SCISSOR
+		};
+		VkPipelineDynamicStateCreateInfo dynamicState{};
 
 		PipelineBuilder() {
 			inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
@@ -110,6 +115,10 @@ namespace vku::material {
 			tesselation.flags = 0;
 			tesselation.patchControlPoints = 3;
 
+			dynamicState.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+			dynamicState.dynamicStateCount = dynamicStateList.size();
+			dynamicState.pDynamicStates = dynamicStateList.data();
+
 			pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
 			pipelineInfo.pNext = nullptr;
 			pipelineInfo.flags = 0;
@@ -121,8 +130,8 @@ namespace vku::material {
 			pipelineInfo.pColorBlendState = &colorBlending;
 			pipelineInfo.pDepthStencilState = &depthStencil;
 			pipelineInfo.pTessellationState = &tesselation;
+			pipelineInfo.pDynamicState = &dynamicState;
 
-			pipelineInfo.pDynamicState = nullptr; // Optional
 			pipelineInfo.basePipelineHandle = VK_NULL_HANDLE; // Optional
 			pipelineInfo.basePipelineIndex = -1; // Optional
 		}
