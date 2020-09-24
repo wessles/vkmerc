@@ -27,10 +27,9 @@ layout(location = 4) in vec4 inTangent;
 
 layout(location = 0) out vec4 outColor;
 
-const int MAX_REFLECTION_LOD = 6;
-
 const float PI = 3.14159265359;
 
+/*
 float GeometrySchlickGGX(float NdotV, float k)
 {
     float nom   = NdotV;
@@ -71,73 +70,140 @@ float ndf(vec3 n, vec3 h, float r)
 	
     return a2 / denom;
 }
+*/
+
+// ----------------------------------------------------------------------------
+float DistributionGGX(vec3 N, vec3 H, float roughness)
+{
+    float a = roughness*roughness;
+    float a2 = a*a;
+    float NdotH = max(dot(N, H), 0.0);
+    float NdotH2 = NdotH*NdotH;
+
+    float nom   = a2;
+    float denom = (NdotH2 * (a2 - 1.0) + 1.0);
+    denom = PI * denom * denom;
+
+    return nom / denom;
+}
+// ----------------------------------------------------------------------------
+float GeometrySchlickGGX(float NdotV, float roughness)
+{
+    float r = (roughness + 1.0);
+    float k = (r*r) / 8.0;
+
+    float nom   = NdotV;
+    float denom = NdotV * (1.0 - k) + k;
+
+    return nom / denom;
+}
+// ----------------------------------------------------------------------------
+float GeometrySmith(vec3 N, vec3 V, vec3 L, float roughness)
+{
+    float NdotV = max(dot(N, V), 0.0);
+    float NdotL = max(dot(N, L), 0.0);
+    float ggx2 = GeometrySchlickGGX(NdotV, roughness);
+    float ggx1 = GeometrySchlickGGX(NdotL, roughness);
+
+    return ggx1 * ggx2;
+}
+// ----------------------------------------------------------------------------
+vec3 fresnelSchlick(float cosTheta, vec3 F0)
+{
+    return F0 + (1.0 - F0) * pow(1.0 - cosTheta, 5.0);
+}
+// ----------------------------------------------------------------------------
+vec3 fresnelSchlickRoughness(float cosTheta, vec3 F0, float roughness)
+{
+    return F0 + (max(vec3(1.0 - roughness), F0) - F0) * pow(1.0 - cosTheta, 5.0);
+}
+
 
 // cook-torrance BRDF
-vec3 brdf(vec3 c, vec3 n, vec3 wo, vec3 wi, float m, float r) {
+vec3 brdf(vec3 c, vec3 n, vec3 wo, vec3 wi, float m, float r, vec3 F0) {
 	vec3 h = normalize(wo+wi);
-	float D = ndf(n, h, r);
-	float F = fresnel(n, wo, m);
-	float G = GeometrySmith(n, wo, wi, r);
 	float WoDotN = max(0.0, dot(wo, n));
 	float WiDotN = max(0.0, dot(wi, n));
+	float D = DistributionGGX(n, h, r);
+	vec3 F = fresnelSchlick(max(WoDotN,0.0), F0);
+	float G = GeometrySmith(n, wo, wi, r);
 	
-	float Ks = 1.0 - F;
+	vec3 Ks = 1.0 - F;
 
-	return (Ks * c / PI + vec3(D*F*G/(4*WoDotN * WiDotN))) * WiDotN;
+	return (Ks * c / PI + D*F*G/(4*WoDotN * WiDotN)) * WiDotN;
 }
 
 // p  = frag position
 // n  = frag normal
 // wo = direction to viewer
-vec3 reflectance(vec3 c, vec3 p, vec3 n, vec3 wo, float m, float r) {
-	return brdf(c, n, wo, -global.directionalLight.xyz, m, r);
+vec3 reflectance(vec3 c, vec3 p, vec3 n, vec3 wo, float m, float r, vec3 F0) {
+	return brdf(c, n, wo, -global.directionalLight.xyz, m, r, F0);
 }
 
-void main()
-{
-
+vec3 getNormal() {
 	vec3 normal      = normalize(inNormal);
 	vec3 tangent     = normalize(inTangent.xyz);
 	vec3 bitangent   = cross(inNormal, inTangent.xyz) * inTangent.w;
 	mat3 TBN         = mat3(tangent, bitangent, normal);
-	vec3 localNormal = texture(tex_normal, inTexCoord).xyz;
-	normal           = normalize(TBN * localNormal);
+	vec3 localNormal = texture(tex_normal, inTexCoord).xyz * 2.0 - vec3(1.0);
+	return normalize(TBN * localNormal);
+}
 
-	vec2 m_r = texture(tex_metal_rough, inTexCoord).xy;
+void main()
+{
+	vec3 albedo = pow(texture(tex_albedo, inTexCoord).rgb, vec3(2.2));
+	vec2 m_r = texture(tex_metal_rough, inTexCoord).gb;
+	float roughness = m_r.x;
+	float metallic = m_r.y;
+	float ao = texture(tex_ao, inTexCoord).r;
+
+	vec3 N = getNormal();
+	vec3 V = normalize(global.camPos.xyz - inPosition);
+    vec3 R = reflect(-V, N); 
+
+	// calculate reflectance at normal incidence; if dia-electric (like plastic) use F0 
+    // of 0.04 and if it's a metal, use the albedo color as F0 (metallic workflow)    
+    #define METALLIC
+	#ifdef METALLIC
+	vec3 F0 = albedo;
+	#else
+	vec3 F0 = vec3(0.04); 
+    F0 = mix(F0, albedo, metallic);
+	#endif
 	
-	// metalicity
-	float m = m_r.r;
-	//float m = 1.0;
-	m = mix(0.05, 0.95, m);
-	
-	// roughness
-	//float r = mix(0.05, 0.95, m_r.g);
-	float r = m_r.g;
-	
-	// frag position to eye direction vector
-	vec3 Wo = normalize(global.camPos.xyz - inPosition);
-	
-	outColor.a = 1.0;
+	outColor = vec4(0.0, 0.0, 0.0, 1.0);
 	
 	// per-source lighting
-	vec3 c = texture(tex_albedo, inTexCoord).rgb;
-    outColor.rgb = max(vec3(0.0), reflectance(c, inPosition, normal, Wo, m, r));
-	
+	{
+		//outColor.rgb += max(vec3(0.0), reflectance(albedo, inPosition, N, V, metallic, roughness, F0));
+	}
+
 	// IBL ambient lighting
-	vec3 F = fresnelRoughness(max(dot(normal, Wo), 0.0), mix(vec3(0.04), c, m), r);
-	vec3 kS = F;
-    vec3 kD = 1.0 - kS;
-    kD *= 1.0 - m;
+	{
+		// ambient lighting (we now use IBL as the ambient term)
+		vec3 F = fresnelSchlickRoughness(max(dot(N, V), 0.0), F0, roughness);
+		
+		vec3 kS = F;
+		vec3 kD = 1.0 - kS;
+		kD *= 1.0 - metallic;
+		
+		const float MAX_REFLECTION_LOD = 9.0;
+
+		vec3 prefilteredColor = textureLod(tex_spec_ibl, R,  roughness * MAX_REFLECTION_LOD).rgb;
+		vec2 brdf  = texture(tex_brdf_lut, vec2(max(dot(N, V), 0.0), roughness)).rg;
+		vec3 spec = prefilteredColor * (F * brdf.x + brdf.y);
+		
+		vec3 diffuse = textureLod(tex_diffuse_ibl, N, roughness*MAX_REFLECTION_LOD).xyz * albedo;
+		
+		vec3 ambient = (kD * diffuse + spec) * ao;
+		
+		outColor.rgb += ambient*0.5;
+	}
 	
-	vec3 prefilteredColor = textureLod(tex_spec_ibl, reflect(normal, Wo),  r * MAX_REFLECTION_LOD).rgb;
-    vec2 brdf  = texture(tex_brdf_lut, vec2(max(dot(normal, Wo), 0.0), r)).rg;
-    vec3 spec = prefilteredColor * (F * brdf.x + brdf.y);
+	// emissive lighting
+	{
+		outColor.rgb += pow(texture(tex_emissive, inTexCoord).rgb, vec3(2.2));
+	}
 	
-	vec3 diffuse = textureLod(tex_diffuse_ibl, normal, r*MAX_REFLECTION_LOD).xyz * c;
-	
-	vec3 ambient = (kD * diffuse + spec) * texture(tex_ao, inTexCoord).r;
-	
-	outColor.rgb += ambient;
-	
-	outColor.rgb += texture(tex_emissive, inTexCoord).rgb;
+	outColor.rgb = pow(outColor.rgb, vec3(1.0/2.0));
 }

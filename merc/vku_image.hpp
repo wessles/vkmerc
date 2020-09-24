@@ -313,18 +313,18 @@ namespace vku::image {
 
 		return view;
 	}
-	void loadFromBuffer(VkBuffer buffer, uint32_t texWidth, uint32_t texHeight, Image& image) {
+	void loadFromBuffer(VkBuffer buffer, uint32_t texWidth, uint32_t texHeight, Image& image, VkFormat format = VK_FORMAT_R8G8B8A8_SRGB) {
 		vku::image::createImage(texWidth, texHeight, image.mipLevels, VK_SAMPLE_COUNT_1_BIT,
-			VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_TILING_OPTIMAL,
+			format, VK_IMAGE_TILING_OPTIMAL,
 			VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
 			VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
 			image.handle, image.memory);
 		// transition layout to transfer destination optimized type
-		vku::image::transitionImageLayout(image.handle, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, image.mipLevels);
+		vku::image::transitionImageLayout(image.handle, format, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, image.mipLevels);
 		// copy data to image
 		vku::image::copyBufferToImage(buffer, image.handle, static_cast<uint32_t>(texWidth), static_cast<uint32_t>(texHeight));
 		// transition layout to readonly shader data, and generate mip maps (even if it's just one)
-		vku::image::generateMipmaps(image.handle, VK_FORMAT_R8G8B8A8_SRGB, texWidth, texHeight, image.mipLevels);
+		vku::image::generateMipmaps(image.handle, format, texWidth, texHeight, image.mipLevels);
 	}
 	void loadTexture(const std::string& path, Image& image) {
 		int texWidth, texHeight, texChannels;

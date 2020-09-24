@@ -199,6 +199,7 @@ namespace vku::cubemapgen {
 		pipelineBuilder.viewport.width = dim;
 		pipelineBuilder.viewport.height = dim;
 		pipelineBuilder.scissor.extent = { dim, dim };
+		pipelineBuilder.dynamicState.dynamicStateCount = 0;
 
 		std::vector<VkPipelineShaderStageCreateInfo> shaderStages{};
 		shaderStages.resize(2);

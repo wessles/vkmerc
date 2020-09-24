@@ -116,8 +116,7 @@ namespace vku::gltf {
 
 		GltfModel() {}
 
-		GltfModel(const std::string& filename, VkDescriptorSetLayout globalDSetLayout,
-			RNode *pass, VkDescriptorPool descriptorPool,
+		GltfModel(const std::string& filename, VkDescriptorSetLayout globalDSetLayout, RNode *pass, VkDescriptorPool descriptorPool,
 			Texture &brdf_lut, Texture &diffuse_ibl, Texture &specular_ibl) {
 			tinygltf::Model model;
 
@@ -143,9 +142,7 @@ namespace vku::gltf {
 			loadMaterials(globalDSetLayout, pass, descriptorPool, model,
 				brdf_lut, diffuse_ibl, specular_ibl);
 
-
 			MeshData meshData;
-
 
 			for (uint32_t i = 0; i < model.nodes.size(); i++) {
 				tinygltf::Node &gNode = model.nodes[i];
@@ -198,12 +195,12 @@ namespace vku::gltf {
 				memcpy(data, buffer, static_cast<size_t>(bufferSize));
 				vkUnmapMemory(state::device, stagingBufferMemory);
 
-				vku::image::loadFromBuffer(stagingBuffer, gImage.width, gImage.height, image);
+				vku::image::loadFromBuffer(stagingBuffer, gImage.width, gImage.height, image, VK_FORMAT_R8G8B8A8_UNORM);
 
 				vkDestroyBuffer(vku::state::device, stagingBuffer, nullptr);
 				vkFreeMemory(vku::state::device, stagingBufferMemory, nullptr);
 
-				image.view = vku::image::createImageView(image.handle, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_ASPECT_COLOR_BIT, image.mipLevels);
+				image.view = vku::image::createImageView(image.handle, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_ASPECT_COLOR_BIT, image.mipLevels);
 			}
 
 			if (deleteBuffer) {
@@ -376,6 +373,7 @@ namespace vku::gltf {
 							texCoordsBuffer = reinterpret_cast<const float*>(&(model.buffers[view.buffer].data[accessor.byteOffset + view.byteOffset]));
 						}
 
+
 						for (size_t v = 0; v < vertexCount; v++) {
 							Vertex vert{};
 							vert.pos = glm::vec4(glm::make_vec3(&positionBuffer[v * 3]), 1.0f);
@@ -431,7 +429,6 @@ namespace vku::gltf {
 					node.mesh.primitives.push_back(primitive);
 				}
 			}
-
 
 			if (parent) {
 				parent->children.push_back(node);

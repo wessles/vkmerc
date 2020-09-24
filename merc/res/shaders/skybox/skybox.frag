@@ -18,5 +18,5 @@ layout(location = 0) out vec4 outColor;
 void main() {
 	vec3 dir = normalize(fragPosition);
 
-	outColor = textureLod(environment, normalize(dir), (sin(global.time)+1.0) * 6.0 / 2.0);
+	outColor = textureLod(environment, normalize(dir), 0.0);
 }
