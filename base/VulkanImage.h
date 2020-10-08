@@ -1,5 +1,7 @@
 #pragma once
 
+#include <string>
+
 #include <vulkan/vulkan.h>
 
 namespace vku {
@@ -30,15 +32,24 @@ namespace vku {
 	public:
 		VulkanImage() {}
 		VulkanImage(VulkanDevice* device, VulkanImageInfo info);
+		VulkanImage(VulkanDevice* device, const std::string& path);
+		VulkanImage(VulkanDevice* device, const std::array<std::string, 6>& paths);
 		~VulkanImage();
 
-		void writeImageViewInfo(VulkanImageViewInfo& viewInfo);
+		void writeImageViewInfo(VulkanImageViewInfo* viewInfo);
 
-		void transitionImageLayout(VkCommandBuffer commandBuffer, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout);
-		void transitionImageLayout(VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout);
+		void transitionImageLayout(VkCommandBuffer commandBuffer, VkImageLayout oldLayout, VkImageLayout newLayout);
+		void transitionImageLayout(VkImageLayout oldLayout, VkImageLayout newLayout);
+
+		void copyBufferToImage(VkBuffer buffer);
+		void loadFromBuffer(VkBuffer buffer);
 
 		// allow convenient casting
 		operator VkImage() const { return handle; }
+
+	private:
+		void init(VulkanImageInfo info);
+		void generateMipmaps();
 	};
 
 
@@ -105,6 +116,7 @@ namespace vku {
 
 		VulkanTexture() {}
 		VulkanTexture(VulkanDevice* device, VulkanTextureInfo info);
+		~VulkanTexture();
 
 		VkDescriptorImageInfo getImageInfo(VkImageLayout layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 		VkWriteDescriptorSet getDescriptorWrite(uint32_t binding, VkDescriptorSet descriptorSet, VkDescriptorImageInfo* imageInfo);

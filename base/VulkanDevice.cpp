@@ -320,35 +320,6 @@ namespace vku {
 		// copy vertex data to newly allocated buffer
 		vkBindBufferMemory(*this, buffer, bufferMemory, 0);
 	}
-	template <class Type>
-	void VulkanDevice::initDeviceLocalBuffer(std::vector<Type>& bufferData, VkBuffer& buffer, VkDeviceMemory& deviceMemory, VkBufferUsageFlagBits bufferUsageBit) {
-		VkDeviceSize bufferSize = sizeof(bufferData[0]) * bufferData.size();
-
-		VkBuffer stagingBuffer;
-		VkDeviceMemory stagingBufferMemory;
-		createBuffer(bufferSize,
-			VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-			stagingBuffer,
-			stagingBufferMemory);
-
-		void* data;
-		vkMapMemory(state::device, stagingBufferMemory, 0, bufferSize, 0, &data);
-		memcpy(data, bufferData.data(), (size_t)bufferSize);
-		vkUnmapMemory(state::device, stagingBufferMemory);
-
-		createBuffer(bufferSize,
-			VK_BUFFER_USAGE_TRANSFER_DST_BIT | bufferUsageBit,
-			VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-			buffer,
-			deviceMemory);
-
-		// copy staging buffer to vertex buffer
-		copyBuffer(stagingBuffer, buffer, bufferSize);
-
-		vkDestroyBuffer(state::device, stagingBuffer, nullptr);
-		vkFreeMemory(state::device, stagingBufferMemory, nullptr);
-	}
 
 	uint32_t VulkanDevice::findSupportedMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties) {
 		VkPhysicalDeviceMemoryProperties memProperties;

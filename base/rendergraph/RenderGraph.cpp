@@ -56,8 +56,7 @@ namespace vku {
 	}
 
 	void RenderGraph::createLayouts() {
-		// generate singular resources for nodes (renderpass, descriptor set layout)
-			// as opposed to the duplicated resources we make later (descriptor set, framebuffer)
+		// generate singular resources for nodes (renderpass, descriptor set layout) as opposed to the duplicated resources we make later (descriptor set, framebuffer)
 		for (Pass* node : nodes) {
 			// generate one render pass for each node
 			{
@@ -223,7 +222,7 @@ namespace vku {
 
 				// transformation matrix push constant
 				VkPushConstantRange transformPushConst;
-				transformPushConst.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+				transformPushConst.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_VERTEX_BIT;
 				transformPushConst.offset = 0;
 				transformPushConst.size = sizeof(glm::mat4);
 
@@ -301,20 +300,20 @@ namespace vku {
 					VulkanImageViewInfo imageViewInfo{};
 					imageViewInfo.aspectFlags = aspect;
 					imageViewInfo.format = edge->format;
-					
+
 					VulkanSamplerInfo samplerInfo{};
 					samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
 					samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-					
+
 					VulkanTextureInfo texInfo{};
 					texInfo.imageInfo = imageInfo;
 					texInfo.imageViewInfo = imageViewInfo;
 					texInfo.samplerInfo = samplerInfo;
-					
+
 					edge->instances[i].texture = new VulkanTexture(device, texInfo);
-					
+
 					if (isDepth) {
-						edge->instances[i].texture->image->transitionImageLayout(edge->format, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
+						edge->instances[i].texture->image->transitionImageLayout(VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
 					}
 				}
 			}
@@ -334,10 +333,8 @@ namespace vku {
 						allocInfo.descriptorSetCount = 1;
 						allocInfo.pSetLayouts = &current.inputLayout->handle;
 
-						for (int i = 0; i < numInstances; i++) {
-							if (vkAllocateDescriptorSets(*device, &allocInfo, &node->instances[i].descriptorSet) != VK_SUCCESS) {
-								throw std::runtime_error("Failed to allocate descriptor sets!");
-							}
+						if (vkAllocateDescriptorSets(*device, &allocInfo, &node->instances[i].descriptorSet) != VK_SUCCESS) {
+							throw std::runtime_error("Failed to allocate descriptor sets!");
 						}
 					}
 					// (Part II.B) create framebuffers

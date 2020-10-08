@@ -1,10 +1,12 @@
 #version 450
 #extension GL_ARB_separate_shader_objects : enable
 
+
 layout(std140, binding = 0) uniform GlobalUniform {
 	mat4 view;
 	mat4 proj;
 	vec4 camPos;
+	vec4 directionalLight;
 	vec2 screenRes;
 	float time;
 } global;

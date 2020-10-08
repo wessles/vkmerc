@@ -2,6 +2,8 @@
 
 #include "NewDemo.hpp"
 
+#define GLM_FORCE_RADIANS
+#define GLM_FORCE_DEPTH_ZERO_TO_ONE
 #include <glm/glm.hpp>
 #include <spirv_cross/spirv_glsl.hpp>
 
@@ -20,7 +22,6 @@ using namespace vku::mesh;
 #include "gltfload.h"
 #include "ue4_brdf_table.hpp"
 #include "cubemapgen.hpp"
-
 
 
 

@@ -31,12 +31,13 @@ namespace vku {
 			cleanup();
 		}
 
-	private:
+	protected:
 		std::string windowTitle = "Untitled";
 		uint32_t framerateLimit = 60;
 		uint32_t width = 800, height = 600;
 		bool debugEnabled = true;
 
+	private:
 		// this flag will be tripped on the window-resize event
 		bool framebufferResized = false;
 

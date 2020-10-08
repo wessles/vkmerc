@@ -6,40 +6,41 @@
 
 namespace vku {
 
-	template<class UniformStructType>
-	VulkanUniform<UniformStructType>::VulkanUniform(VulkanDevice* device, uint32_t numInstances) {
+	VulkanUniform::VulkanUniform(VulkanDevice* device, uint32_t numInstances, size_t dataSize) {
 		this->device = device;
 		this->numInstances = numInstances;
+		this->dataSize = dataSize;
+
+		this->bufferInfo.resize(numInstances);
+		this->buffer.resize(numInstances);
+		this->memory.resize(numInstances);
 
 		for (size_t i = 0; i < numInstances; i++) {
-			device->createBuffer(bufferSize,
+			device->createBuffer(dataSize,
 				VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
 				VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
 				buffer[i], memory[i]);
 		}
 	}
 
-	template<class UniformStructType>
-	VulkanUniform<UniformStructType>::~VulkanUniform() {
+	VulkanUniform::~VulkanUniform() {
 		for (size_t i = 0; i < numInstances; i++) {
 			vkDestroyBuffer(*device, buffer[i], nullptr);
 			vkFreeMemory(*device, memory[i], nullptr);
 		}
 	}
 
-	template<class UniformStructType>
-	void VulkanUniform<UniformStructType>::write(uint32_t i, UniformStructType& global) {
+	void VulkanUniform::write(uint32_t i, void *global) {
 		void* data;
-		vkMapMemory(*device, memory[i], 0, sizeof(UniformStructType), 0, &data);
-		memcpy(data, &global, sizeof(global));
+		vkMapMemory(*device, memory[i], 0, dataSize, 0, &data);
+		memcpy(data, global, dataSize);
 		vkUnmapMemory(*device, memory[i]);
 	}
 
-	template<class UniformStructType>
-	VkWriteDescriptorSet VulkanUniform<UniformStructType>::getDescriptorWrite(uint32_t i, VkDescriptorSet& descriptorSet) {
+	VkWriteDescriptorSet VulkanUniform::getDescriptorWrite(uint32_t i, VkDescriptorSet descriptorSet) {
 		bufferInfo[i].buffer = buffer[i];
 		bufferInfo[i].offset = 0;
-		bufferInfo[i].range = sizeof(UniformStructType);
+		bufferInfo[i].range = dataSize;
 
 		VkWriteDescriptorSet descriptorWrite{};
 		descriptorWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;

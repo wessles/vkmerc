@@ -46,9 +46,9 @@ namespace vku {
 		VkDescriptorSet descriptorSet;
 
 		VkDescriptorSetAllocateInfo info{};
+		info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
 		info.descriptorPool = device->descriptorPool;
 		info.descriptorSetCount = 1;
-		info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
 		info.pSetLayouts = &handle;
 
 		vkAllocateDescriptorSets(*device, &info, &descriptorSet);

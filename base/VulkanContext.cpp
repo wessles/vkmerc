@@ -11,16 +11,15 @@ namespace vku {
 	static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity, VkDebugUtilsMessageTypeFlagsEXT messageType, const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData, void* pUserData) {
 		std::cerr << pCallbackData->pMessage << std::endl;
 		// let warnings pass without crashing
-		if (messageSeverity == VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT) return VK_TRUE;
 		VulkanContext* context = static_cast<VulkanContext*>(pUserData);
 		if (context->haltOnValidationError) {
 			std::cerr << "Halting on validation error." << std::endl;
 #ifdef _MSC_VER
 			__debugbreak();
 #endif
-			std::exit(1);
+			std::cin.get();
 		}
-		return VK_FALSE;
+		return VK_TRUE;
 	}
 	bool checkValidationLayerSupport(const std::vector<const char*>& validationLayers) {
 		uint32_t layerCount;
@@ -75,8 +74,6 @@ namespace vku {
 			func(instance, debugMessenger, nullptr);
 		}
 	}
-
-	//
 
 	std::vector<const char*> getRequiredGLFWExtensions() {
 		uint32_t glfwExtensionCount = 0;

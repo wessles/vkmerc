@@ -6,6 +6,7 @@ layout(std140, binding = 0) uniform GlobalUniform {
 	mat4 view;
 	mat4 proj;
 	vec4 camPos;
+	vec4 directionalLight;
 	vec2 screenRes;
 	float time;
 } global;
