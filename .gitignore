@@ -47,6 +47,9 @@ _deps
 *.a
 *.lib
 
+# shaders
+*.spv
+
 # Executables
 *.exe
 *.out
