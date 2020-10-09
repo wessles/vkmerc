@@ -45,7 +45,7 @@ _deps
 *.lai
 *.la
 *.a
-*.lib
+#*.lib
 
 # shaders
 *.spv
