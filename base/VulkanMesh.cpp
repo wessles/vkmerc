@@ -2,6 +2,7 @@
 
 #define GLM_ENABLE_EXPERIMENTAL
 #include <glm/gtx/hash.hpp>
+#include <mikktspace.h>
 #include <vulkan/vulkan.h>
 
 #include "VulkanDevice.h"
@@ -70,6 +71,72 @@ namespace vku {
 		vkDestroyBuffer(*device, iBuffer, nullptr);
 		vkFreeMemory(*device, vMemory, nullptr);
 		vkFreeMemory(*device, iMemory, nullptr);
+	}
+
+	void MikktCalculator::generateTangentSpace(VulkanMeshData* model) {
+		SMikkTSpaceInterface iMikkt;
+		iMikkt.m_getNumFaces = getNumFaces;
+		iMikkt.m_getNumVerticesOfFace = getNumVerticesOfFace;
+		iMikkt.m_getPosition = getPosition;
+		iMikkt.m_getNormal = getNormal;
+		iMikkt.m_getTexCoord = getTexCoord;
+		iMikkt.m_setTSpaceBasic = setTSpaceBasic;
+		iMikkt.m_setTSpace = nullptr;
+
+		SMikkTSpaceContext context;
+		context.m_pInterface = &iMikkt;
+		context.m_pUserData = model;
+
+		genTangSpaceDefault(&context);
+	}
+
+	// Return primitive count
+	 int  MikktCalculator::getNumFaces(const SMikkTSpaceContext* context) {
+		 VulkanMeshData* mesh = static_cast<VulkanMeshData*>(context->m_pUserData);
+
+		return mesh->indices.size() / 3;
+	}
+
+	// Return number of vertices in the primitive given by index.
+	 int  MikktCalculator::getNumVerticesOfFace(const SMikkTSpaceContext* context, const int primnum) {
+		return 3;
+	}
+
+	// Write 3-float position of the vertex's point.
+	 void MikktCalculator::getPosition(const SMikkTSpaceContext* context, float pos[], const int primnum, const int vtxnum) {
+		 VulkanMeshData* mesh = static_cast<VulkanMeshData*>(context->m_pUserData);
+
+		glm::vec3& v = mesh->vertices[mesh->indices[primnum * 3 + vtxnum]].pos;
+		pos[0] = v[0];
+		pos[1] = v[1];
+		pos[2] = v[2];
+	}
+
+	// Write 3-float vertex normal.
+	 void MikktCalculator::getNormal(const SMikkTSpaceContext* context, float normal[], const int primnum, const int vtxnum) {
+		 VulkanMeshData* mesh = static_cast<VulkanMeshData*>(context->m_pUserData);
+
+		glm::vec3& n = mesh->vertices[mesh->indices[primnum * 3 + vtxnum]].normal;
+		normal[0] = n[0];
+		normal[1] = n[1];
+		normal[2] = n[2];
+	}
+
+	// Write 2-float vertex uv.
+	 void MikktCalculator::getTexCoord(const SMikkTSpaceContext* context, float uv[], const int primnum, const int vtxnum) {
+		 VulkanMeshData* mesh = static_cast<VulkanMeshData*>(context->m_pUserData);
+
+		glm::vec2& tc = mesh->vertices[mesh->indices[primnum * 3 + vtxnum]].texCoord;
+		uv[0] = tc[0];
+		uv[1] = tc[1];
+	}
+
+	// Compute and set attributes on the geometry vertex.
+	 void MikktCalculator::setTSpaceBasic(const SMikkTSpaceContext* context, const float tangentu[], const float sign, const int primnum, const int vtxnum) {
+		 VulkanMeshData* mesh = static_cast<VulkanMeshData*>(context->m_pUserData);
+
+		Vertex& v = mesh->vertices[mesh->indices[primnum * 3 + vtxnum]];
+		v.tangent = glm::vec4(tangentu[0], tangentu[1], tangentu[2], sign);
 	}
 }
 

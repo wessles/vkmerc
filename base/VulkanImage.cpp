@@ -18,8 +18,8 @@ namespace vku {
 	// VulkanImage
 
 	VulkanImage::VulkanImage(VulkanDevice* device, VulkanImageInfo info) {
-		init(info);
 		this->device = device;
+		init(info);
 	}
 
 	VulkanImage::~VulkanImage() {
@@ -86,6 +86,7 @@ namespace vku {
 
 	VulkanTexture::VulkanTexture(VulkanDevice* device, VulkanTextureInfo info) {
 		image = new VulkanImage(device, info.imageInfo);
+		image->writeImageViewInfo(&info.imageViewInfo);
 		view = new VulkanImageView(device, info.imageViewInfo);
 		sampler = new VulkanSampler(device, info.samplerInfo);
 	}
@@ -365,10 +366,7 @@ namespace vku {
 		vkFreeMemory(*device, stagingBufferMemory, nullptr);
 	}
 
-	/*
-	negx, y, z
-	posx, y, z
-	*/
+	// generates a cubemap
 	VulkanImage::VulkanImage(VulkanDevice* device, const std::array<std::string, 6>& paths) {
 		this->device = device;
 
@@ -405,7 +403,7 @@ namespace vku {
 		VulkanImageInfo imageInfo{};
 		imageInfo.width = texWidth;
 		imageInfo.height = texHeight;
-		imageInfo.mipLevels = static_cast<uint32_t>(std::floor(std::log2(std::max(texWidth, texHeight)))) + 1;
+		imageInfo.mipLevels = 1;
 		imageInfo.arrayLayers = 6;
 		imageInfo.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
 		imageInfo.imageCreateFlags = VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;

@@ -3,10 +3,15 @@
 #include <string>
 #include <glm/gtc/type_ptr.hpp>
 
+#include <tiny_gltf.h>
+
 #include <mikktspace.h>
 
+#include "VulkanMesh.h"
+#include "VulkanImage.h"
+#include "VulkanDevice.h"
+#include "scene/Scene.h"
 
-using namespace vku::mesh;
 
 /*
 	Major thanks to Sascha Willem's GLTF example, I took a lot of inspiration from it:
@@ -14,76 +19,7 @@ using namespace vku::mesh;
 */
 
 namespace vku {
-	struct MikktCalculator {
-		void generateTangentSpace(MeshData *model) {
-			SMikkTSpaceInterface iMikkt;
-			iMikkt.m_getNumFaces = getNumFaces;
-			iMikkt.m_getNumVerticesOfFace = getNumVerticesOfFace;
-			iMikkt.m_getPosition = getPosition;
-			iMikkt.m_getNormal = getNormal;
-			iMikkt.m_getTexCoord = getTexCoord;
-			iMikkt.m_setTSpaceBasic = setTSpaceBasic;
-			iMikkt.m_setTSpace = nullptr;
-
-			SMikkTSpaceContext context;
-			context.m_pInterface = &iMikkt;
-			context.m_pUserData = model;
-
-			genTangSpaceDefault(&context);
-		}
-
-		// Return primitive count
-		static int  getNumFaces(const SMikkTSpaceContext *context) {
-			MeshData *mesh = static_cast<MeshData*>(context->m_pUserData);
-
-			return mesh->indices.size() / 3;
-		}
-
-		// Return number of vertices in the primitive given by index.
-		static int  getNumVerticesOfFace(const SMikkTSpaceContext *context, const int primnum) {
-			return 3;
-		}
-
-		// Write 3-float position of the vertex's point.
-		static void getPosition(const SMikkTSpaceContext *context, float pos[], const int primnum, const int vtxnum) {
-			MeshData *mesh = static_cast<MeshData*>(context->m_pUserData);
-
-			glm::vec3 &v = mesh->vertices[mesh->indices[primnum * 3 + vtxnum]].pos;
-			pos[0] = v[0];
-			pos[1] = v[1];
-			pos[2] = v[2];
-		}
-
-		// Write 3-float vertex normal.
-		static void getNormal(const SMikkTSpaceContext *context, float normal[], const int primnum, const int vtxnum) {
-			MeshData *mesh = static_cast<MeshData*>(context->m_pUserData);
-
-			glm::vec3 &n = mesh->vertices[mesh->indices[primnum * 3 + vtxnum]].normal;
-			normal[0] = n[0];
-			normal[1] = n[1];
-			normal[2] = n[2];
-		}
-
-		// Write 2-float vertex uv.
-		static void getTexCoord(const SMikkTSpaceContext *context, float uv[], const int primnum, const int vtxnum) {
-			MeshData *mesh = static_cast<MeshData*>(context->m_pUserData);
-
-			glm::vec2 &tc = mesh->vertices[mesh->indices[primnum * 3 + vtxnum]].texCoord;
-			uv[0] = tc[0];
-			uv[1] = tc[1];
-		}
-
-		// Compute and set attributes on the geometry vertex.
-		static void setTSpaceBasic(const SMikkTSpaceContext *context, const float tangentu[], const float sign, const int primnum, const int vtxnum) {
-			MeshData *mesh = static_cast<MeshData*>(context->m_pUserData);
-
-			Vertex &v = mesh->vertices[mesh->indices[primnum * 3 + vtxnum]];
-			v.tangent = glm::vec4(tangentu[0], tangentu[1], tangentu[2], sign);
-		}
-
-		static void setTSpace(const SMikkTSpaceContext *context, const float tangentu[], const float tangentv[], const float magu, const float magv, const tbool keep, const int primnum, const int vtxnum);
-	};
-	struct GltfModel {
+	struct VulkanGltfModel {
 		// A primitive contains the data for a single draw call
 		struct Primitive {
 			uint32_t firstIndex;
@@ -104,17 +40,16 @@ namespace vku {
 			glm::mat4 matrix;
 		};
 
-		MeshBuffer meshBuf{};
+		VulkanMeshBuffer* meshBuf;
 
-		std::vector<Texture> textures;
-		std::vector<Material> materials;
-		std::vector<MaterialInstance> materialInstances;
+		std::vector<VulkanTexture*> textures;
+		std::vector<Material*> materials;
+		std::vector<MaterialInstance*> materialInstances;
 		std::vector<Node> nodes;
 
-		GltfModel() {}
+		VulkanGltfModel() {}
 
-		GltfModel(const std::string& filename, VkDescriptorSetLayout globalDSetLayout, RNode *pass, VkDescriptorPool descriptorPool,
-			Texture &brdf_lut, Texture &diffuse_ibl, Texture &specular_ibl) {
+		VulkanGltfModel(const std::string& filename, Scene* scene, Pass* pass, VulkanTexture* brdf_lut, VulkanTexture* diffuse_ibl, VulkanTexture* specular_ibl) {
 			tinygltf::Model model;
 
 			tinygltf::TinyGLTF loader;
@@ -135,25 +70,28 @@ namespace vku {
 			else
 				std::cout << "Loaded glTF: " << filename << std::endl;
 
-			loadTextures(model);
-			loadMaterials(globalDSetLayout, pass, descriptorPool, model,
-				brdf_lut, diffuse_ibl, specular_ibl);
+			loadTextures(scene->device, model);
+			loadMaterials(scene, pass, model, brdf_lut, diffuse_ibl, specular_ibl);
 
-			MeshData meshData;
+			VulkanMeshData meshData;
 
 			for (uint32_t i = 0; i < model.nodes.size(); i++) {
-				tinygltf::Node &gNode = model.nodes[i];
+				tinygltf::Node& gNode = model.nodes[i];
 				loadNode(gNode, model, nullptr, meshData.indices, meshData.vertices);
-				Node &node = nodes[i];
+				Node& node = nodes[i];
 			}
 
 			MikktCalculator mikkt;
 			mikkt.generateTangentSpace(&meshData);
 
-			meshBuf.load(meshData);
+			meshBuf = new VulkanMeshBuffer(scene->device, meshData);
 		}
 
-		Image loadImage(uint32_t i, tinygltf::Model &model) {
+		struct ImageWithView {
+			VulkanImage* image;
+			VulkanImageView* view;
+		};
+		ImageWithView loadImage(VulkanDevice* device, uint32_t i, tinygltf::Model& model) {
 			tinygltf::Image gImage = model.images[i];
 
 			// Get the image data from the glTF loader
@@ -179,25 +117,33 @@ namespace vku {
 			}
 
 			// Load texture from image buffer
-			Image image{};
+			ImageWithView image{};
 			{
 				VkBuffer stagingBuffer;
 				VkDeviceMemory stagingBufferMemory;
-				vku::buffer::createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+				device->createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
 					VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
 					stagingBuffer, stagingBufferMemory);
 
 				void* data;
-				vkMapMemory(state::device, stagingBufferMemory, 0, bufferSize, 0, &data);
+				vkMapMemory(*device, stagingBufferMemory, 0, bufferSize, 0, &data);
 				memcpy(data, buffer, static_cast<size_t>(bufferSize));
-				vkUnmapMemory(state::device, stagingBufferMemory);
+				vkUnmapMemory(*device, stagingBufferMemory);
 
-				vku::image::loadFromBuffer(stagingBuffer, gImage.width, gImage.height, image, VK_FORMAT_R8G8B8A8_UNORM);
+				VulkanImageInfo info{};
+				info.width = gImage.width;
+				info.height = gImage.height;
+				info.format = VK_FORMAT_R8G8B8A8_UNORM;
+				info.usage = VK_IMAGE_USAGE_SAMPLED_BIT| VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+				image.image = new VulkanImage(device, info);
+				image.image->loadFromBuffer(stagingBuffer);
 
-				vkDestroyBuffer(vku::state::device, stagingBuffer, nullptr);
-				vkFreeMemory(vku::state::device, stagingBufferMemory, nullptr);
+				vkDestroyBuffer(*device, stagingBuffer, nullptr);
+				vkFreeMemory(*device, stagingBufferMemory, nullptr);
 
-				image.view = vku::image::createImageView(image.handle, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_ASPECT_COLOR_BIT, image.mipLevels);
+				VulkanImageViewInfo viewInfo{};
+				image.image->writeImageViewInfo(&viewInfo);
+				image.view = new VulkanImageView(device, viewInfo);
 			}
 
 			if (deleteBuffer) {
@@ -226,56 +172,53 @@ namespace vku {
 				return VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
 			}
 		}
-		VkSampler loadSampler(uint32_t i, tinygltf::Model &model) {
-			tinygltf::Sampler &gSampler = model.samplers[i];
-			VkSampler sampler{};
+		VulkanSampler* loadSampler(VulkanDevice* device, uint32_t i, tinygltf::Model& model) {
+			tinygltf::Sampler& gSampler = model.samplers[i];
 
-			VkSamplerCreateInfo samplerCI = vku::create::createSamplerCI();
+			VulkanSamplerInfo info{};
 
 			// set up min/mag filters
-			samplerCI.minFilter = convertTinyGltfFilter(gSampler.minFilter);
-			samplerCI.magFilter = convertTinyGltfFilter(gSampler.magFilter);
+			info.minFilter = convertTinyGltfFilter(gSampler.minFilter);
+			info.magFilter = convertTinyGltfFilter(gSampler.magFilter);
 
 			// set up wraps
-			samplerCI.addressModeU = convertTinyGltfAddressMode(gSampler.wrapR);
-			samplerCI.addressModeV = convertTinyGltfAddressMode(gSampler.wrapS);
-			samplerCI.addressModeW = convertTinyGltfAddressMode(gSampler.wrapT);
+			info.addressModeU = convertTinyGltfAddressMode(gSampler.wrapR);
+			info.addressModeV = convertTinyGltfAddressMode(gSampler.wrapS);
+			info.addressModeW = convertTinyGltfAddressMode(gSampler.wrapT);
 
-			if (vkCreateSampler(vku::state::device, &samplerCI, nullptr, &sampler) != VK_SUCCESS) {
-				throw std::runtime_error("Failed to create sampler.");
-			}
+			VulkanSampler* sampler = new VulkanSampler(device, info);
 
 			return sampler;
 		}
-		void loadTextures(tinygltf::Model &model) {
+		void loadTextures(VulkanDevice* device, tinygltf::Model& model) {
 			textures.resize(model.textures.size());
 			for (uint32_t i = 0; i < model.textures.size(); i++) {
-				tinygltf::Texture &gTexture = model.textures[i];
-				Texture &texture = textures[i];
+				tinygltf::Texture& gTexture = model.textures[i];
+				textures[i] = new VulkanTexture;
 
-				texture.image = loadImage(gTexture.source, model);
-				texture.sampler = loadSampler(gTexture.sampler, model);
+				ImageWithView imageAndView = loadImage(device, gTexture.source, model);
+				textures[i]->image = imageAndView.image;
+				textures[i]->view = imageAndView.view;
+				textures[i]->sampler = loadSampler(device, gTexture.sampler, model);
 			}
 		}
 
-		void loadMaterials(VkDescriptorSetLayout globalDSetLayout, RNode *pass,
-			VkDescriptorPool descriptorPool, tinygltf::Model &model,
-			Texture &brdf_lut, Texture &diffuse_ibl, Texture &specular_ibl) {
+		void loadMaterials(Scene* scene, Pass* pass, tinygltf::Model& model, VulkanTexture* brdf_lut, VulkanTexture* diffuse_ibl, VulkanTexture* specular_ibl) {
 			materials.resize(model.materials.size());
 			materialInstances.resize(model.materials.size());
 
 			for (uint32_t i = 0; i < model.materials.size(); i++) {
-				tinygltf::Material &gMaterial = model.materials[i];
-				Material &material = materials[i];
-				MaterialInstance &materialInstance = materialInstances[i];
+				tinygltf::Material& gMaterial = model.materials[i];
+				Material*& material = materials[i];
+				MaterialInstance*& materialInstance = materialInstances[i];
 
-				material = Material(globalDSetLayout, pass->pass, pass->inputLayout, {
+				material = new Material(scene, pass, {
 					{"res/shaders/pbr/pbr.vert", VK_SHADER_STAGE_VERTEX_BIT},
 					{"res/shaders/pbr/pbr.frag", VK_SHADER_STAGE_FRAGMENT_BIT}
 					});
-				material.createPipeline();
+				material->createPipeline();
 
-				materialInstance = MaterialInstance(&material, descriptorPool);
+				materialInstance = new MaterialInstance(material);
 
 				int colorTexIdx = gMaterial.pbrMetallicRoughness.baseColorTexture.index;
 				int normalTexIdx = gMaterial.normalTexture.index;
@@ -284,32 +227,32 @@ namespace vku {
 				int aoTexIdx = gMaterial.occlusionTexture.index;
 
 				if (colorTexIdx > -1) {
-					Texture &colorTexture = textures[colorTexIdx];
-					materialInstance.write(0, colorTexture);
+					VulkanTexture* colorTexture = textures[colorTexIdx];
+					materialInstance->write(0, colorTexture);
 				}
 				if (normalTexIdx > -1) {
-					Texture &normalTexture = textures[normalTexIdx];
-					materialInstance.write(1, normalTexture);
+					VulkanTexture* normalTexture = textures[normalTexIdx];
+					materialInstance->write(1, normalTexture);
 				}
 				if (metallicTexIdx > -1) {
-					Texture &metallicTexture = textures[metallicTexIdx];
-					materialInstance.write(2, metallicTexture);
+					VulkanTexture* metallicTexture = textures[metallicTexIdx];
+					materialInstance->write(2, metallicTexture);
 				}
 				if (emissiveTexIdx > -1) {
-					Texture &emissiveTexture = textures[emissiveTexIdx];
-					materialInstance.write(3, emissiveTexture);
+					VulkanTexture* emissiveTexture = textures[emissiveTexIdx];
+					materialInstance->write(3, emissiveTexture);
 				}
 				if (aoTexIdx > -1) {
-					Texture &aoTexture = textures[aoTexIdx];
-					materialInstance.write(4, aoTexture);
+					VulkanTexture* aoTexture = textures[aoTexIdx];
+					materialInstance->write(4, aoTexture);
 				}
-				materialInstance.write(5, specular_ibl);
-				materialInstance.write(6, diffuse_ibl);
-				materialInstance.write(7, brdf_lut);
+				materialInstance->write(5, specular_ibl);
+				materialInstance->write(6, diffuse_ibl);
+				materialInstance->write(7, brdf_lut);
 			}
 		}
 
-		void loadNode(tinygltf::Node &gNode, tinygltf::Model &model, Node *parent, std::vector<uint32_t>& indexBuffer, std::vector<Vertex>& vertexBuffer) {
+		void loadNode(tinygltf::Node& gNode, tinygltf::Model& model, Node* parent, std::vector<uint32_t>& indexBuffer, std::vector<Vertex>& vertexBuffer) {
 			Node node{};
 			node.matrix = glm::mat4(1.0f);
 
@@ -331,10 +274,10 @@ namespace vku {
 			}
 
 			if (gNode.mesh > -1) {
-				const tinygltf::Mesh &mesh = model.meshes[gNode.mesh];
+				const tinygltf::Mesh& mesh = model.meshes[gNode.mesh];
 
 				for (size_t i = 0; i < mesh.primitives.size(); i++) {
-					const tinygltf::Primitive &gPrimitive = mesh.primitives[i];
+					const tinygltf::Primitive& gPrimitive = mesh.primitives[i];
 
 					uint32_t firstIndex = static_cast<uint32_t>(indexBuffer.size());
 					uint32_t vertexStart = static_cast<uint32_t>(vertexBuffer.size());
@@ -435,7 +378,7 @@ namespace vku {
 			}
 		}
 
-		void drawNode(VkCommandBuffer commandBuffer, uint32_t i, Node &node) {
+		void drawNode(VkCommandBuffer commandBuffer, uint32_t i, Node& node) {
 			if (node.mesh.primitives.size() > 0) {
 				// Pass the node's matrix via push constants
 				// Traverse the node hierarchy to the top-most parent to get the final matrix of the current node
@@ -448,11 +391,11 @@ namespace vku {
 
 				for (Primitive& primitive : node.mesh.primitives) {
 					if (primitive.indexCount > 0) {
-						MaterialInstance &materialInstance = materialInstances[primitive.materialIndex];
-						materialInstance.material->bind(commandBuffer);
-						materialInstance.bind(commandBuffer, i);
+						MaterialInstance* materialInstance = materialInstances[primitive.materialIndex];
+						materialInstance->material->bind(commandBuffer);
+						materialInstance->bind(commandBuffer, i);
 
-						vkCmdPushConstants(commandBuffer, materialInstance.material->pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(glm::mat4), &nodeMatrix);
+						vkCmdPushConstants(commandBuffer, materialInstance->material->pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT|VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(glm::mat4), &nodeMatrix);
 
 						vkCmdDrawIndexed(commandBuffer, primitive.indexCount, 1, primitive.firstIndex, 0, 0);
 					}
@@ -466,21 +409,21 @@ namespace vku {
 		void draw(VkCommandBuffer commandBuffer, uint32_t i)
 		{
 			VkDeviceSize offsets[1] = { 0 };
-			vkCmdBindVertexBuffers(commandBuffer, 0, 1, &meshBuf.vBuffer, offsets);
-			vkCmdBindIndexBuffer(commandBuffer, meshBuf.iBuffer, 0, VK_INDEX_TYPE_UINT32);
+			vkCmdBindVertexBuffers(commandBuffer, 0, 1, &meshBuf->vBuffer, offsets);
+			vkCmdBindIndexBuffer(commandBuffer, meshBuf->iBuffer, 0, VK_INDEX_TYPE_UINT32);
 			for (auto& node : nodes) {
 				drawNode(commandBuffer, i, node);
 			}
 		}
 
-		void destroy(VkDescriptorPool descriptorPool) {
-			for (Texture &texture : textures) {
-				vku::image::destroyTexture(vku::state::device, texture);
+		~VulkanGltfModel() {
+			for (VulkanTexture* texture : textures) {
+				delete texture;
 			}
-			for (Material &material : materials) {
-				material.destroy(descriptorPool);
+			for (Material* material : materials) {
+				delete material;
 			}
-			meshBuf.destroy();
+			delete meshBuf;
 		}
 	};
 }

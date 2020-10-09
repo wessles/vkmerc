@@ -41,6 +41,8 @@ namespace vku {
 		std::vector<Pass*> to;
 		VkFormat format;
 		VkSampleCountFlagBits samples;
+		bool transient;
+		bool isSwapchain;
 
 		std::vector<AttachmentInstance> instances;
 	};

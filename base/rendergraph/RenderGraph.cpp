@@ -38,12 +38,10 @@ namespace vku {
 		if (edge->from != nullptr)
 			edge->from->out.push_back(edge);
 
-		bool isTransient = edge->to.size() == 1 && edge->to[0] == nullptr;
-		if (!isTransient) {
-			for (Pass* node : edge->to) {
-				node->in.push_back(edge);
-			}
+		for (Pass* node : edge->to) {
+			node->in.push_back(edge);
 		}
+
 		edges.push_back(edge);
 		return edge;
 	}
@@ -62,7 +60,6 @@ namespace vku {
 			{
 				Pass& current = *node;
 
-				bool isStart = this->start == &current;
 				bool isEnd = this->end == &current;
 
 				std::vector<VkAttachmentDescription> attachments;
@@ -96,11 +93,16 @@ namespace vku {
 					inputRefs.push_back({ i++, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL });
 				}
 
-				if (isEnd && current.out.size() != 1) {
+				uint32_t outgoingNonTransientEdges = 0;
+				for (Attachment* edge : current.out) {
+					if (!edge->transient) ++outgoingNonTransientEdges;
+				}
+
+				if (isEnd && outgoingNonTransientEdges != 1) {
 					throw std::runtime_error("Out node must have *exactly* one outgoing attachment.");
 				}
 
-				for (auto& edge : current.out) {
+				for (Attachment* edge : current.out) {
 					bool isDepth = edge->format == this->device->swapchain->depthFormat;
 
 					VkAttachmentDescription attachment{};
@@ -119,13 +121,13 @@ namespace vku {
 						attachment.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 					}
 
-					if (isEnd && isDepth) {
+					if (edge->isSwapchain && isDepth) {
 						throw std::runtime_error("Cannot present a depth layout image!");
 					}
 
-					if (isEnd)
+					if (edge->isSwapchain) {
 						attachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-
+					}
 					if (isDepth) {
 						if (depthWrite) {
 							throw std::runtime_error("Cannot write to multiple depth attachments!");
@@ -263,7 +265,7 @@ namespace vku {
 			{
 				VkExtent2D& screen = device->swapchain->swapChainExtent;
 				for (Attachment* edge : this->edges) {
-					if (edge->to.size() == 0) {
+					if (edge->isSwapchain) {
 						continue;
 					}
 
@@ -281,12 +283,10 @@ namespace vku {
 					}
 
 					// transient means that the data never leaves the GPU (like a depth buffer)
-					// indicated in graph by edge going to "nullptr"
-					bool isTransient = edge->to.size() == 1 && edge->to[0] == nullptr;
-					if (isTransient)
+					if (edge->transient)
 						usage |= VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT;
 
-					bool isInput = edge->to.size() > 0 && !isTransient;
+					bool isInput = edge->to.size() > 0 && !edge->transient;
 					if (isInput)
 						usage |= VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
 
@@ -299,7 +299,6 @@ namespace vku {
 
 					VulkanImageViewInfo imageViewInfo{};
 					imageViewInfo.aspectFlags = aspect;
-					imageViewInfo.format = edge->format;
 
 					VulkanSamplerInfo samplerInfo{};
 					samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
@@ -322,7 +321,6 @@ namespace vku {
 				for (Pass* node : this->nodes) {
 					Pass& current = *node;
 
-					bool isStart = this->start == &current;
 					bool isEnd = this->end == &current;
 
 					// (Part II.A) create descriptor set based on layout
@@ -344,15 +342,12 @@ namespace vku {
 						for (auto& edge : current.in) {
 							attachmentImageViews.push_back(*edge->instances[i].texture->view);
 						}
-						if (isEnd) {
-							attachmentImageViews.push_back(*device->swapchain->swapChainImageViews[i]);
-						}
-						else {
-							for (auto& edge : current.out) {
+						for (auto& edge : current.out) {
+							if(edge->isSwapchain)
+								attachmentImageViews.push_back(*device->swapchain->swapChainImageViews[i]);
+							else
 								attachmentImageViews.push_back(*edge->instances[i].texture->view);
-							}
 						}
-
 
 						VkFramebufferCreateInfo framebufferCreate{};
 						framebufferCreate.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;

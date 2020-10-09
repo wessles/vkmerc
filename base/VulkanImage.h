@@ -86,6 +86,8 @@ namespace vku {
 		VkBorderColor borderColor = VK_BORDER_COLOR_INT_OPAQUE_WHITE;
 		VkFilter minFilter = VK_FILTER_LINEAR;
 		VkFilter magFilter = VK_FILTER_LINEAR;
+		float minLod = 0.0f;
+		float maxLod = 1.0f;
 	};
 
 	struct VulkanSampler {

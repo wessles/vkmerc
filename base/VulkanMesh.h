@@ -3,6 +3,7 @@
 #include <vector>
 
 #include <glm/glm.hpp>
+#include <mikktspace.h>
 #include <vulkan/vulkan.h>
 
 namespace vku {
@@ -72,6 +73,24 @@ namespace vku {
 			{{3,-1,0}, {},{2,0},{}},
 		},
 		{0,1,2}
+	};
+
+	struct MikktCalculator {
+		void generateTangentSpace(VulkanMeshData* model);
+		// Return primitive count
+		static int  getNumFaces(const SMikkTSpaceContext* context);
+		// Return number of vertices in the primitive given by index.
+		static int  getNumVerticesOfFace(const SMikkTSpaceContext* context, const int primnum);
+		// Write 3-float position of the vertex's point.
+		static void getPosition(const SMikkTSpaceContext* context, float pos[], const int primnum, const int vtxnum);
+		// Write 3-float vertex normal.
+		static void getNormal(const SMikkTSpaceContext* context, float normal[], const int primnum, const int vtxnum);
+		// Write 2-float vertex uv.
+		static void getTexCoord(const SMikkTSpaceContext* context, float uv[], const int primnum, const int vtxnum);
+		// Compute and set attributes on the geometry vertex.
+		static void setTSpaceBasic(const SMikkTSpaceContext* context, const float tangentu[], const float sign, const int primnum, const int vtxnum);
+		// We leave this one out since I haven't found a use for it yet
+		//static void setTSpace(const SMikkTSpaceContext* context, const float tangentu[], const float tangentv[], const float magu, const float magv, const tbool keep, const int primnum, const int vtxnum);
 	};
 }
 
