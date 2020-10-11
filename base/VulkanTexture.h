@@ -120,9 +120,6 @@ namespace vku {
 		VulkanTexture(VulkanDevice* device, VulkanTextureInfo info);
 		~VulkanTexture();
 
-		VkDescriptorImageInfo getImageInfo(VkImageLayout layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-		VkWriteDescriptorSet getDescriptorWrite(uint32_t binding, VkDescriptorSet descriptorSet, VkDescriptorImageInfo* imageInfo);
-
 		// allow convenient casting
 		operator VkImage() const { return *image; }
 	};

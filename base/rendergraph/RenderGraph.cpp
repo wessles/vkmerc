@@ -7,8 +7,8 @@
 
 #include "VulkanDevice.h"
 #include "VulkanSwapchain.h"
-#include "VulkanDescriptorSetLayout.h"
-#include "VulkanImage.h"
+#include "VulkanDescriptorSet.h"
+#include "VulkanTexture.h"
 
 namespace vku {
 	RenderGraph::RenderGraph(Scene* scene, uint32_t numInstances) {
@@ -71,6 +71,8 @@ namespace vku {
 				uint32_t i = 0;
 
 				for (auto& edge : current.in) {
+					if (!edge->inputAttachment) continue;
+
 					bool isDepth = edge->format == this->device->swapchain->depthFormat;
 
 					VkAttachmentDescription attachment{};
@@ -88,7 +90,7 @@ namespace vku {
 						attachment.initialLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 						attachment.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 					}
-
+					
 					attachments.push_back(attachment);
 					inputRefs.push_back({ i++, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL });
 				}
@@ -266,6 +268,8 @@ namespace vku {
 				VkExtent2D& screen = device->swapchain->swapChainExtent;
 				for (Attachment* edge : this->edges) {
 					if (edge->isSwapchain) {
+						edge->width = screen.width;
+						edge->height = screen.height;
 						continue;
 					}
 
@@ -291,8 +295,16 @@ namespace vku {
 						usage |= VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
 
 					VulkanImageInfo imageInfo{};
-					imageInfo.width = screen.width;
-					imageInfo.height = screen.height;
+					if (edge->sizeToSwapchain) {
+						imageInfo.width = screen.width;
+						imageInfo.height = screen.height;
+						edge->width = screen.width;
+						edge->height = screen.height;
+					}
+					else {
+						imageInfo.width = edge->width;
+						imageInfo.height = edge->height;
+					}
 					imageInfo.numSamples = edge->samples;
 					imageInfo.format = edge->format;
 					imageInfo.usage = usage;
@@ -325,25 +337,21 @@ namespace vku {
 
 					// (Part II.A) create descriptor set based on layout
 					{
-						VkDescriptorSetAllocateInfo allocInfo{};
-						allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-						allocInfo.descriptorPool = device->descriptorPool;
-						allocInfo.descriptorSetCount = 1;
-						allocInfo.pSetLayouts = &current.inputLayout->handle;
-
-						if (vkAllocateDescriptorSets(*device, &allocInfo, &node->instances[i].descriptorSet) != VK_SUCCESS) {
-							throw std::runtime_error("Failed to allocate descriptor sets!");
-						}
+						node->instances[i].descriptorSet = new VulkanDescriptorSet(current.inputLayout);
 					}
 					// (Part II.B) create framebuffers
 					{
 						std::vector<VkImageView> attachmentImageViews;
 
 						for (auto& edge : current.in) {
-							attachmentImageViews.push_back(*edge->instances[i].texture->view);
+							if(edge->inputAttachment)
+								attachmentImageViews.push_back(*edge->instances[i].texture->view);
 						}
+						uint32_t width = -1, height = -1;
 						for (auto& edge : current.out) {
-							if(edge->isSwapchain)
+							width = edge->width;
+							height = edge->height;
+							if (edge->isSwapchain)
 								attachmentImageViews.push_back(*device->swapchain->swapChainImageViews[i]);
 							else
 								attachmentImageViews.push_back(*edge->instances[i].texture->view);
@@ -354,8 +362,8 @@ namespace vku {
 						framebufferCreate.renderPass = node->pass;
 						framebufferCreate.attachmentCount = static_cast<uint32_t>(attachmentImageViews.size());
 						framebufferCreate.pAttachments = attachmentImageViews.data();
-						framebufferCreate.width = device->swapchain->swapChainExtent.width;
-						framebufferCreate.height = device->swapchain->swapChainExtent.height;
+						framebufferCreate.width = width;
+						framebufferCreate.height = height;
 						framebufferCreate.layers = 1;
 
 						if (vkCreateFramebuffer(*device, &framebufferCreate, nullptr, &(node->instances[i].framebuffer)) != VK_SUCCESS) {
@@ -385,9 +393,7 @@ namespace vku {
 						throw std::runtime_error("Binding index for an edge could not be found in target node.");
 					}
 
-					VkDescriptorImageInfo imageInfo = edge->instances[i].texture->getImageInfo();
-					VkWriteDescriptorSet setWrite = edge->instances[i].texture->getDescriptorWrite(bindingIndex, node->instances[i].descriptorSet, &imageInfo);
-					vkUpdateDescriptorSets(*device, 1, &setWrite, 0, nullptr);
+					node->instances[i].descriptorSet->write(bindingIndex, edge->instances[i].texture);
 				}
 			}
 		}
@@ -396,7 +402,7 @@ namespace vku {
 	void RenderGraph::destroyInstances() {
 		for (Pass* node : nodes) {
 			for (int i = 0; i < numInstances; i++) {
-				vkFreeDescriptorSets(*device, device->descriptorPool, 1, &node->instances[i].descriptorSet);
+				delete node->instances[i].descriptorSet;
 				vkDestroyFramebuffer(*device, node->instances[i].framebuffer, nullptr);
 			}
 		}
@@ -408,27 +414,16 @@ namespace vku {
 	}
 
 	void RenderGraph::render(VkCommandBuffer cmdbuf, uint32_t i) {
-		uint32_t width = device->swapchain->swapChainExtent.width;
-		uint32_t height = device->swapchain->swapChainExtent.height;
-
 		// we'll set width/height in the loop
 		VkViewport viewport{};
 		viewport.x = 0.0;
 		viewport.y = 0.0;
-		viewport.width = width;
-		viewport.height = height;
 		viewport.minDepth = 0.0;
 		viewport.maxDepth = 1.0;
 		VkRect2D scissor{};
 		scissor.offset = { 0,0 };
-		scissor.extent = { width,height };
 
-		// set viewport / scissor before any drawing
-		// this is because materials have dynamic viewport & scissor state by default
-		vkCmdSetViewport(cmdbuf, 0, 1, &viewport);
-		vkCmdSetScissor(cmdbuf, 0, 1, &scissor);
-
-		vkCmdBindDescriptorSets(cmdbuf, VK_PIPELINE_BIND_POINT_GRAPHICS, scene->globalPipelineLayout, 0, 1, &scene->globalDescriptorSets[i], 0, nullptr);
+		vkCmdBindDescriptorSets(cmdbuf, VK_PIPELINE_BIND_POINT_GRAPHICS, scene->globalPipelineLayout, 0, 1, &scene->globalDescriptorSets[i]->handle, 0, nullptr);
 
 		for (auto& node : nodes) {
 			std::vector<VkClearValue> clearValues{};
@@ -445,6 +440,15 @@ namespace vku {
 				clearValues.push_back(clear);
 			}
 
+
+			uint32_t width = node->out[0]->width;
+			uint32_t height = node->out[0]->height;
+			viewport.width = width;
+			viewport.height = height;
+			scissor.extent = { width,height };
+			vkCmdSetViewport(cmdbuf, 0, 1, &viewport);
+			vkCmdSetScissor(cmdbuf, 0, 1, &scissor);
+
 			VkRenderPassBeginInfo passBeginInfo{};
 			passBeginInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
 			passBeginInfo.renderArea.offset = { 0, 0 };
@@ -455,7 +459,7 @@ namespace vku {
 			passBeginInfo.framebuffer = node->instances[i].framebuffer;
 			passBeginInfo.renderPass = node->pass;
 
-			vkCmdBindDescriptorSets(cmdbuf, VK_PIPELINE_BIND_POINT_GRAPHICS, node->pipelineLayout, 1, 1, &node->instances[i].descriptorSet, 0, nullptr);
+			vkCmdBindDescriptorSets(cmdbuf, VK_PIPELINE_BIND_POINT_GRAPHICS, node->pipelineLayout, 1, 1, &node->instances[i].descriptorSet->handle, 0, nullptr);
 
 			vkCmdBeginRenderPass(cmdbuf, &passBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
 			{

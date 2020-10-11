@@ -6,13 +6,19 @@
 #include <glm/glm.hpp>
 
 namespace vku {
+	struct Object;
+
 	struct VulkanDevice;
 	struct DescriptorLayout;
 	struct VulkanDescriptorSetLayout;
+	struct VulkanDescriptorSet;
 	struct VulkanUniform;
 
 	struct SceneGlobalUniform
 	{
+		glm::mat4 cascade0;
+		glm::mat4 cascade1;
+		glm::mat4 cascade2;
 		glm::mat4 view;
 		glm::mat4 proj;
 		glm::vec4 camPos;
@@ -28,11 +34,16 @@ namespace vku {
 		VulkanDevice* device;
 		VulkanDescriptorSetLayout* globalDescriptorSetLayout;
 		VkPipelineLayout globalPipelineLayout;
-		std::vector<VkDescriptorSet> globalDescriptorSets;
-		VulkanUniform* globalUniforms;
+		std::vector<VulkanDescriptorSet*> globalDescriptorSets;
+		std::vector<VulkanUniform*> globalUniforms;
+
+		std::vector<Object*> objects{};
 
 		Scene(VulkanDevice* device, SceneInfo info);
 		~Scene();
+
+		void addObject(Object* object);
+		void render(VkCommandBuffer cmdBuf, uint32_t swapIdx, bool noMaterial);
 
 		void updateUniforms(uint32_t i, SceneGlobalUniform* uniform);
 	};

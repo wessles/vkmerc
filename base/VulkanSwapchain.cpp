@@ -7,7 +7,7 @@
 
 #include "VulkanContext.h"
 #include "VulkanDevice.h"
-#include "VulkanImage.h"
+#include "VulkanTexture.h"
 
 namespace vku {
 	VkSurfaceFormatKHR chooseSwapSurfaceFormat(const std::vector<VkSurfaceFormatKHR>& availableFormats) {

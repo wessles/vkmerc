@@ -11,10 +11,11 @@ namespace vku {
 	struct Scene;
 	struct VulkanDevice;
 	struct VulkanTexture;
+	struct VulkanDescriptorSet;
 	struct VulkanDescriptorSetLayout;
 
 	struct PassInstance {
-		VkDescriptorSet descriptorSet;
+		VulkanDescriptorSet* descriptorSet;
 		VkFramebuffer framebuffer;
 	};
 
@@ -30,7 +31,7 @@ namespace vku {
 		std::function<void(const uint32_t, const VkCommandBuffer&)> commands;
 
 		VkRenderPass pass;
-		VulkanDescriptorSetLayout *inputLayout;
+		VulkanDescriptorSetLayout* inputLayout;
 		VkPipelineLayout pipelineLayout;
 
 		std::vector<PassInstance> instances;
@@ -43,6 +44,12 @@ namespace vku {
 		VkSampleCountFlagBits samples;
 		bool transient;
 		bool isSwapchain;
+
+		bool inputAttachment = false;
+
+		bool sizeToSwapchain = true;
+		uint32_t width = -1;
+		uint32_t height = -1;
 
 		std::vector<AttachmentInstance> instances;
 	};

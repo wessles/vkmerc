@@ -3,7 +3,7 @@
 #include <vulkan/vulkan.h>
 
 #include "../VulkanDevice.h"
-#include "../VulkanImage.h"
+#include "../VulkanTexture.h"
 #include "../VulkanMaterial.h"
 
 #define GLM_FORCE_RADIANS
@@ -141,32 +141,8 @@ namespace vku {
 
 		// Descriptors
 		VulkanDescriptorSetLayout* descriptorsetlayout = new VulkanDescriptorSetLayout(device, { {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT} });
-
-		// Descriptor Pool
-		std::vector<VkDescriptorPoolSize> poolSizes{ {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1} };
-		VkDescriptorPoolCreateInfo descriptorPoolCI{};
-		descriptorPoolCI.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-		descriptorPoolCI.poolSizeCount = 1;
-		descriptorPoolCI.pPoolSizes = &poolSizes[0];
-		descriptorPoolCI.maxSets = 1;
-		VkDescriptorPool descriptorpool;
-		if (vkCreateDescriptorPool(*device, &descriptorPoolCI, nullptr, &descriptorpool) != VK_SUCCESS) {
-			throw std::runtime_error("Failed to create temporary descriptor pool.");
-		}
-
-		// Descriptor sets
-		VkDescriptorSet descriptorset;
-		VkDescriptorSetAllocateInfo allocInfo{};
-		allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-		allocInfo.descriptorPool = descriptorpool;
-		allocInfo.descriptorSetCount = 1;
-		allocInfo.pSetLayouts = &descriptorsetlayout->handle;
-		if (vkAllocateDescriptorSets(*device, &allocInfo, &descriptorset) != VK_SUCCESS) {
-			throw std::runtime_error("Failed to create descriptor sets.");
-		}
-		VkDescriptorImageInfo info = cubemapFilterParams.cubemap->getImageInfo();
-		VkWriteDescriptorSet write = cubemapFilterParams.cubemap->getDescriptorWrite(0, descriptorset, &info);
-		vkUpdateDescriptorSets(*device, 1, &write, 0, nullptr);
+		VulkanDescriptorSet *descriptorset = new VulkanDescriptorSet(descriptorsetlayout);
+		descriptorset->write(0, cubemapFilterParams.cubemap);
 
 
 		// Pipeline layout
@@ -199,7 +175,7 @@ namespace vku {
 		}
 
 		// Pipeline
-		PipelineBuilder pipelineBuilder(device);
+		VulkanMaterialInfo pipelineBuilder(device);
 		pipelineBuilder.rasterizer.cullMode = VK_CULL_MODE_NONE;
 		pipelineBuilder.colorBlendAttachment.blendEnable = VK_FALSE;
 		pipelineBuilder.colorBlendAttachment.blendEnable = VK_FALSE;
@@ -296,7 +272,7 @@ namespace vku {
 					vkCmdPushConstants(cmdBuf, pipelinelayout, VK_SHADER_STAGE_FRAGMENT_BIT, sizeof(VertexPushBlock), cubemapFilterParams.pushConstantSize, cubemapFilterParams.pushConstantData[m]);
 
 					vkCmdBindPipeline(cmdBuf, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
-					vkCmdBindDescriptorSets(cmdBuf, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelinelayout, 0, 1, &descriptorset, 0, NULL);
+					vkCmdBindDescriptorSets(cmdBuf, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelinelayout, 0, 1, &descriptorset->handle, 0, NULL);
 
 					skyboxMesh->draw(cmdBuf);
 
@@ -341,7 +317,7 @@ namespace vku {
 		vkDestroyFramebuffer(*device, offscreen.framebuffer, nullptr);
 		delete offscreen.view;
 		delete offscreen.image;
-		vkDestroyDescriptorPool(*device, descriptorpool, nullptr);
+		delete descriptorset;
 		delete descriptorsetlayout;
 		vkDestroyPipeline(*device, pipeline, nullptr);
 		vkDestroyPipelineLayout(*device, pipelinelayout, nullptr);

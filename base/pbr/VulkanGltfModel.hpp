@@ -8,9 +8,10 @@
 #include <mikktspace.h>
 
 #include "VulkanMesh.h"
-#include "VulkanImage.h"
+#include "VulkanTexture.h"
 #include "VulkanDevice.h"
 #include "scene/Scene.h"
+#include "scene/Object.h"
 
 
 /*
@@ -19,7 +20,7 @@
 */
 
 namespace vku {
-	struct VulkanGltfModel {
+	struct VulkanGltfModel : public Object {
 		// A primitive contains the data for a single draw call
 		struct Primitive {
 			uint32_t firstIndex;
@@ -43,8 +44,8 @@ namespace vku {
 		VulkanMeshBuffer* meshBuf;
 
 		std::vector<VulkanTexture*> textures;
-		std::vector<Material*> materials;
-		std::vector<MaterialInstance*> materialInstances;
+		std::vector<VulkanMaterial*> materials;
+		std::vector<VulkanMaterialInstance*> materialInstances;
 		std::vector<Node> nodes;
 
 		VulkanGltfModel() {}
@@ -209,16 +210,16 @@ namespace vku {
 
 			for (uint32_t i = 0; i < model.materials.size(); i++) {
 				tinygltf::Material& gMaterial = model.materials[i];
-				Material*& material = materials[i];
-				MaterialInstance*& materialInstance = materialInstances[i];
+				VulkanMaterial*& material = materials[i];
+				VulkanMaterialInstance*& materialInstance = materialInstances[i];
 
-				material = new Material(scene, pass, {
+				VulkanMaterialInfo info(scene->device);
+				material = new VulkanMaterial(&info, scene, pass, {
 					{"res/shaders/pbr/pbr.vert", VK_SHADER_STAGE_VERTEX_BIT},
 					{"res/shaders/pbr/pbr.frag", VK_SHADER_STAGE_FRAGMENT_BIT}
 					});
-				material->createPipeline();
 
-				materialInstance = new MaterialInstance(material);
+				materialInstance = new VulkanMaterialInstance(material);
 
 				int colorTexIdx = gMaterial.pbrMetallicRoughness.baseColorTexture.index;
 				int normalTexIdx = gMaterial.normalTexture.index;
@@ -226,29 +227,31 @@ namespace vku {
 				int emissiveTexIdx = gMaterial.emissiveTexture.index;
 				int aoTexIdx = gMaterial.occlusionTexture.index;
 
-				if (colorTexIdx > -1) {
-					VulkanTexture* colorTexture = textures[colorTexIdx];
-					materialInstance->write(0, colorTexture);
+				for (VulkanDescriptorSet* set : materialInstance->descriptorSets) {
+					if (colorTexIdx > -1) {
+						VulkanTexture* colorTexture = textures[colorTexIdx];
+						set->write(0, colorTexture);
+					}
+					if (normalTexIdx > -1) {
+						VulkanTexture* normalTexture = textures[normalTexIdx];
+						set->write(1, normalTexture);
+					}
+					if (metallicTexIdx > -1) {
+						VulkanTexture* metallicTexture = textures[metallicTexIdx];
+						set->write(2, metallicTexture);
+					}
+					if (emissiveTexIdx > -1) {
+						VulkanTexture* emissiveTexture = textures[emissiveTexIdx];
+						set->write(3, emissiveTexture);
+					}
+					if (aoTexIdx > -1) {
+						VulkanTexture* aoTexture = textures[aoTexIdx];
+						set->write(4, aoTexture);
+					}
+					set->write(5, specular_ibl);
+					set->write(6, diffuse_ibl);
+					set->write(7, brdf_lut);
 				}
-				if (normalTexIdx > -1) {
-					VulkanTexture* normalTexture = textures[normalTexIdx];
-					materialInstance->write(1, normalTexture);
-				}
-				if (metallicTexIdx > -1) {
-					VulkanTexture* metallicTexture = textures[metallicTexIdx];
-					materialInstance->write(2, metallicTexture);
-				}
-				if (emissiveTexIdx > -1) {
-					VulkanTexture* emissiveTexture = textures[emissiveTexIdx];
-					materialInstance->write(3, emissiveTexture);
-				}
-				if (aoTexIdx > -1) {
-					VulkanTexture* aoTexture = textures[aoTexIdx];
-					materialInstance->write(4, aoTexture);
-				}
-				materialInstance->write(5, specular_ibl);
-				materialInstance->write(6, diffuse_ibl);
-				materialInstance->write(7, brdf_lut);
 			}
 		}
 
@@ -378,7 +381,7 @@ namespace vku {
 			}
 		}
 
-		void drawNode(VkCommandBuffer commandBuffer, uint32_t i, Node& node) {
+		void drawNode(VkCommandBuffer commandBuffer, uint32_t i, Node& node, bool noMaterial) {
 			if (node.mesh.primitives.size() > 0) {
 				// Pass the node's matrix via push constants
 				// Traverse the node hierarchy to the top-most parent to get the final matrix of the current node
@@ -391,36 +394,37 @@ namespace vku {
 
 				for (Primitive& primitive : node.mesh.primitives) {
 					if (primitive.indexCount > 0) {
-						MaterialInstance* materialInstance = materialInstances[primitive.materialIndex];
-						materialInstance->material->bind(commandBuffer);
-						materialInstance->bind(commandBuffer, i);
+						VulkanMaterialInstance* materialInstance = materialInstances[primitive.materialIndex];
+						if (!noMaterial) {
+							materialInstance->material->bind(commandBuffer);
+							materialInstance->bind(commandBuffer, i);
+						}
 
-						vkCmdPushConstants(commandBuffer, materialInstance->material->pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT|VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(glm::mat4), &nodeMatrix);
-
+						vkCmdPushConstants(commandBuffer, materialInstance->material->scene->globalPipelineLayout, VK_SHADER_STAGE_VERTEX_BIT|VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(glm::mat4), &nodeMatrix);
 						vkCmdDrawIndexed(commandBuffer, primitive.indexCount, 1, primitive.firstIndex, 0, 0);
 					}
 				}
 			}
 			for (auto& child : node.children) {
-				drawNode(commandBuffer, i, child);
+				drawNode(commandBuffer, i, child, noMaterial);
 			}
 		}
 
-		void draw(VkCommandBuffer commandBuffer, uint32_t i)
-		{
+		virtual void render(VkCommandBuffer cmdBuf, uint32_t swapIdx, bool noMaterial) {
 			VkDeviceSize offsets[1] = { 0 };
-			vkCmdBindVertexBuffers(commandBuffer, 0, 1, &meshBuf->vBuffer, offsets);
-			vkCmdBindIndexBuffer(commandBuffer, meshBuf->iBuffer, 0, VK_INDEX_TYPE_UINT32);
+			vkCmdBindVertexBuffers(cmdBuf, 0, 1, &meshBuf->vBuffer, offsets);
+			vkCmdBindIndexBuffer(cmdBuf, meshBuf->iBuffer, 0, VK_INDEX_TYPE_UINT32);
 			for (auto& node : nodes) {
-				drawNode(commandBuffer, i, node);
+				drawNode(cmdBuf, swapIdx, node, noMaterial);
 			}
 		}
 
 		~VulkanGltfModel() {
+			
 			for (VulkanTexture* texture : textures) {
 				delete texture;
 			}
-			for (Material* material : materials) {
+			for (VulkanMaterial* material : materials) {
 				delete material;
 			}
 			delete meshBuf;

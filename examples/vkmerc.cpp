@@ -4,10 +4,13 @@
 #include <VulkanContext.h>
 #include <VulkanDevice.h>
 #include <VulkanSwapchain.h>
-#include <VulkanImage.h>
-#include <VulkanDescriptorSetLayout.h>
+#include <VulkanTexture.h>
+#include <VulkanDescriptorSet.h>
 #include <VulkanMesh.h>
 #include <VulkanMaterial.h>
+#include <VulkanUniform.h>
+
+#include <util/CascadedShadowmap.hpp>
 
 #define TINYGLTF_IMPLEMENTATION
 #define STB_IMAGE_WRITE_IMPLEMENTATION
@@ -25,17 +28,27 @@
 #define GLM_FORCE_DEPTH_ZERO_TO_ONE
 #include <glm/glm.hpp>
 #include <glm/gtx/transform.hpp>
+#include <glm/gtx/string_cast.hpp>
 
 using namespace std;
 using namespace vku;
 
+struct Shadowmap1CascadeUniform {
+	glm::mat4 cascade0;
+};
+struct Shadowmap2CascadeUniform {
+	glm::mat4 cascade0, cascade1;
+};
+
 class Engine : public BaseEngine {
+	const uint32_t shadowmapDimensions = 256;
+
 public:
 	Engine() {
 		this->windowTitle = "Cube";
-		//this->debugEnabled = false;
-		this->width = 1280;
-		this->height = 720;
+		this->debugEnabled = false;
+		this->width = 900;
+		this->height = 900;
 	}
 
 	OrbitCam* flycam;
@@ -43,6 +56,7 @@ public:
 
 	RenderGraph* graph;
 	Pass* main;
+	Pass* cascades;
 
 	VulkanGltfModel* gltf;
 	VulkanTexture* brdf;
@@ -51,8 +65,12 @@ public:
 
 	VulkanTexture* skybox;
 	VulkanMeshBuffer* boxMeshBuf;
-	Material* mat;
-	MaterialInstance* matInst;
+	VulkanMaterial* mat;
+	VulkanMaterialInstance* matInst;
+
+	std::vector<VulkanUniform*> cascadeUniform;
+	VulkanMaterial* depthOnlyMat;
+	VulkanMaterialInstance* depthOnlyMatInst;
 
 	std::vector<VkCommandBuffer> cmdBufs;
 
@@ -82,18 +100,37 @@ public:
 
 		flycam = new OrbitCam(context->windowHandle);
 
+		cascadeUniform.resize(context->device->swapchain->swapChainLength);
+		for (uint32_t i = 0; i < cascadeUniform.size(); i++) {
+			cascadeUniform[i] = new VulkanUniform(context->device, sizeof(Shadowmap1CascadeUniform));
+		}
+
 		graph = new RenderGraph(scene, context->device->swapchain->swapChainLength);
 		{
+			cascades = graph->pass([&](uint32_t i, const VkCommandBuffer& cb) {
+				depthOnlyMatInst->bind(cb, i);
+				depthOnlyMatInst->material->bind(cb);
+
+				scene->render(cb, i, true);
+			});
+
 			main = graph->pass([&](uint32_t i, const VkCommandBuffer& cb) {
 				matInst->bind(cb, i);
 				matInst->material->bind(cb);
 				boxMeshBuf->draw(cb);
 
-				gltf->draw(cb, i);
+				scene->render(cb, i, false);
 			});
 
 			graph->begin(main);
 			graph->terminate(main);
+
+			Attachment* shadowmap = graph->attachment(cascades, { main });
+			shadowmap->format = context->device->swapchain->depthFormat;
+			shadowmap->samples = VK_SAMPLE_COUNT_1_BIT;
+			shadowmap->sizeToSwapchain = false;
+			shadowmap->width = shadowmapDimensions;
+			shadowmap->height = shadowmapDimensions;
 
 			Attachment* edge = graph->attachment(main, {});
 			edge->format = context->device->swapchain->screenFormat;
@@ -111,18 +148,29 @@ public:
 		irradiancemap = generateIrradianceCube(context->device, skybox);
 		specmap = generatePrefilteredCube(context->device, skybox);
 		gltf = new VulkanGltfModel("res/demo/DamagedHelmet.glb", scene, main, brdf, irradiancemap, specmap);
+		scene->addObject(gltf);
 
-		mat = new Material(scene, main, { {"res/shaders/skybox/skybox.frag", VK_SHADER_STAGE_FRAGMENT_BIT} , {"res/shaders/skybox/skybox.vert", VK_SHADER_STAGE_VERTEX_BIT} });
 		// skyboxes don't care about depth testing / writing
-		mat->pipelineBuilder->depthStencil.depthWriteEnable = false;
-		mat->pipelineBuilder->depthStencil.depthTestEnable = false;
-		mat->pipelineBuilder->rasterizer.frontFace = VK_FRONT_FACE_CLOCKWISE;
-		mat->createPipeline();
-		matInst = new MaterialInstance(mat);
-		matInst->write(0, specmap);
+		VulkanMaterialInfo matInfo(context->device);
+		matInfo.depthStencil.depthWriteEnable = false;
+		matInfo.depthStencil.depthTestEnable = false;
+		matInfo.rasterizer.frontFace = VK_FRONT_FACE_CLOCKWISE;
+		mat = new VulkanMaterial(&matInfo, scene, main, {
+			{"res/shaders/skybox/skybox.frag", VK_SHADER_STAGE_FRAGMENT_BIT},
+			{"res/shaders/skybox/skybox.vert", VK_SHADER_STAGE_VERTEX_BIT} }
+		);
+		matInst = new VulkanMaterialInstance(mat);
+		for (VulkanDescriptorSet* set : matInst->descriptorSets) { set->write(0, skybox); }
+
+		// depth only pipeline
+		VulkanMaterialInfo matInfoDepth(context->device);
+		depthOnlyMat = new VulkanMaterial(&matInfoDepth, scene, cascades, { {"res/shaders/shadowpass/shadowpass.vert", VK_SHADER_STAGE_VERTEX_BIT} });
+		depthOnlyMatInst = new VulkanMaterialInstance(depthOnlyMat);
 
 		buildSwapchainDependants();
 	}
+
+	glm::mat4 cascade = glm::mat4(1.0f);
 
 	void updateUniforms(uint32_t i) {
 		flycam->update();
@@ -131,23 +179,41 @@ public:
 		auto currentTime = std::chrono::high_resolution_clock::now();
 		float time = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
 		
+		float n = 0.01f;
+		float f = 5.0f;
+		float half = (n + f) / 2.0f;
+		float quarter = (n + half) / 2.0f;
+
 		SceneGlobalUniform global{};
 		glm::mat4 transform = flycam->getTransform();
 		global.view = glm::inverse(transform);
 		VkExtent2D swapchainExtent = context->device->swapchain->swapChainExtent;
-		global.proj = flycam->getProjMatrix(static_cast<float>(swapchainExtent.width), static_cast<float>(swapchainExtent.height), 0.01f, 100000000000.0f);
+		global.proj = flycam->getProjMatrix(static_cast<float>(swapchainExtent.width), static_cast<float>(swapchainExtent.height), n, f);
 		global.camPos = transform * glm::vec4(0.0, 0.0, 0.0, 1.0);
 		global.screenRes = { swapchainExtent.width, swapchainExtent.height };
 		global.time = time;
 		global.directionalLight = glm::rotate(glm::mat4(1.0), time, glm::vec3(0.0, 1.0, 0.0)) * glm::vec4(1.0, -1.0, 0.0, 0.0);
 
+		glm::mat4 subfrust0 = glm::inverse(flycam->getProjMatrix(static_cast<float>(swapchainExtent.width), static_cast<float>(swapchainExtent.height), n, quarter));
+		glm::mat4 subfrust1 = glm::inverse(flycam->getProjMatrix(static_cast<float>(swapchainExtent.width), static_cast<float>(swapchainExtent.height), quarter, half));
+		glm::mat4 subfrust2 = glm::inverse(flycam->getProjMatrix(static_cast<float>(swapchainExtent.width), static_cast<float>(swapchainExtent.height), half, f));
+		global.cascade0 = fitLightProjMatToCameraFrustum(subfrust0, global.directionalLight, shadowmapDimensions);
+		global.cascade1 = fitLightProjMatToCameraFrustum(subfrust1, global.directionalLight, shadowmapDimensions);
+		global.cascade2 = fitLightProjMatToCameraFrustum(subfrust2, global.directionalLight, shadowmapDimensions);
+
 		scene->updateUniforms(i, &global);
 	}
 
-	VkCommandBuffer draw(uint32_t swapIdx)
+	VkCommandBuffer draw(uint32_t i)
 	{
-		updateUniforms(swapIdx);
-		return cmdBufs[swapIdx];
+		updateUniforms(i);
+
+		vkFreeCommandBuffers(*context->device, context->device->commandPool, 1, &cmdBufs[i]);
+		cmdBufs[i] = context->device->beginCommandBuffer();
+		graph->render(cmdBufs[i], i);
+		vkEndCommandBuffer(cmdBufs[i]);
+
+		return cmdBufs[i];
 	}
 	void buildSwapchainDependants()
 	{
@@ -173,12 +239,15 @@ public:
 		delete boxMeshBuf;
 		delete matInst;
 		delete mat;
+
+		delete depthOnlyMatInst;
+		delete depthOnlyMat;
+
 		delete flycam;
 
 		delete brdf;
 		delete irradiancemap;
 		delete specmap;
-		delete gltf;
 
 		graph->destroyLayouts();
 		delete scene;

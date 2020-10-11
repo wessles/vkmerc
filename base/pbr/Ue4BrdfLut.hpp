@@ -7,8 +7,8 @@
 #include "../VulkanDevice.h"
 #include "../VulkanShader.h"
 #include "../VulkanMaterial.h"
-#include "../VulkanImage.h"
-#include "../VulkanDescriptorSetLayout.h"
+#include "../VulkanTexture.h"
+#include "../VulkanDescriptorSet.h"
 
 namespace vku {
 	// Adapted from Sascha Willems' pbrtexture.cpp
@@ -137,7 +137,7 @@ namespace vku {
 		}
 
 		// Pipeline
-		PipelineBuilder pipelineBuilder(device);
+		VulkanMaterialInfo pipelineBuilder(device);
 		pipelineBuilder.rasterizer.cullMode = VK_CULL_MODE_NONE;
 		pipelineBuilder.colorBlendAttachment.blendEnable = VK_FALSE;
 		pipelineBuilder.colorBlendAttachment.blendEnable = VK_FALSE;

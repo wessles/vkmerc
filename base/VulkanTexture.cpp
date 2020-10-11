@@ -1,4 +1,4 @@
-#include "VulkanImage.h"
+#include "VulkanTexture.h"
 
 #include <stdexcept>
 
@@ -10,8 +10,6 @@
 #include <array>
 
 #include "VulkanDevice.h"
-
-
 
 namespace vku {
 
@@ -95,28 +93,6 @@ namespace vku {
 		delete image;
 		delete view;
 		delete sampler;
-	}
-
-	VkDescriptorImageInfo VulkanTexture::getImageInfo(VkImageLayout layout) {
-		VkDescriptorImageInfo info{};
-		info.imageLayout = layout;
-		info.imageView = *view;
-		info.sampler = *sampler;
-
-		return info;
-	}
-
-	VkWriteDescriptorSet VulkanTexture::getDescriptorWrite(uint32_t binding, VkDescriptorSet descriptorSet, VkDescriptorImageInfo* imageInfo) {
-		VkWriteDescriptorSet descriptorWrite{};
-		descriptorWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-		descriptorWrite.dstSet = descriptorSet;
-		descriptorWrite.dstBinding = binding;
-		descriptorWrite.dstArrayElement = 0;
-		descriptorWrite.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-		descriptorWrite.descriptorCount = 1;
-		descriptorWrite.pImageInfo = imageInfo;
-
-		return descriptorWrite;
 	}
 
 	void VulkanImage::transitionImageLayout(VkCommandBuffer commandBuffer, VkImageLayout oldLayout, VkImageLayout newLayout) {

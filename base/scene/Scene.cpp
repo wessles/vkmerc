@@ -8,7 +8,9 @@
 #include "../VulkanDevice.h";
 #include "../VulkanSwapchain.h"
 #include "../VulkanUniform.h"
-#include "../VulkanDescriptorSetLayout.h"
+#include "../VulkanDescriptorSet.h"
+
+#include "Object.h"
 
 
 namespace vku {
@@ -37,23 +39,37 @@ namespace vku {
 
 		uint32_t n = this->device->swapchain->swapChainLength;
 
-		this->globalUniforms = new VulkanUniform(device, n, sizeof(SceneGlobalUniform));
-		
+		this->globalUniforms.resize(n);
 		this->globalDescriptorSets.resize(n);
 		for (uint32_t i = 0; i < n; i++) {
-			globalDescriptorSets[i] = globalDescriptorSetLayout->createDescriptorSet();
-			VkWriteDescriptorSet descriptorSetWrite = globalUniforms->getDescriptorWrite(i, globalDescriptorSets[i]);
-			vkUpdateDescriptorSets(*device, 1, &descriptorSetWrite, 0, nullptr);
+			globalUniforms[i] = new VulkanUniform(device, sizeof(SceneGlobalUniform));
+			globalDescriptorSets[i] = new VulkanDescriptorSet(globalDescriptorSetLayout);
+			globalDescriptorSets[i]->write(0, globalUniforms[i]);
 		}
 	}
 
 	Scene::~Scene() {
+		for (Object* obj : objects) {
+			delete obj;
+		}
+
 		vkDestroyPipelineLayout(*device, globalPipelineLayout, nullptr);
 		delete globalDescriptorSetLayout;
-		delete globalUniforms;
+		for (VulkanUniform* uni : globalUniforms)
+			delete uni;
 	}
 
-	void Scene::updateUniforms(uint32_t i, SceneGlobalUniform *uniform) {
-		globalUniforms->write(i, uniform);
+	void Scene::addObject(Object* object) {
+		objects.push_back(object);
+	}
+
+	void Scene::render(VkCommandBuffer cmdBuf, uint32_t swapIdx, bool noMaterial) {
+		for (Object* obj : objects) {
+			obj->render(cmdBuf, swapIdx, noMaterial);
+		}
+	}
+
+	void Scene::updateUniforms(uint32_t i, SceneGlobalUniform* uniform) {
+		globalUniforms[i]->write(uniform);
 	}
 }

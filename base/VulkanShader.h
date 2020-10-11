@@ -10,6 +10,8 @@
 namespace vku {
 	struct VulkanDevice;
 
+	struct VulkanShaderMacroDefs 
+
 	struct VulkanShader {
 		VulkanDevice* device;
 		VkShaderModule handle;
