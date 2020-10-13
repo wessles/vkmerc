@@ -33,7 +33,6 @@ namespace vku {
 		VkRenderPass pass;
 		VulkanDescriptorSetLayout* inputLayout;
 		VkPipelineLayout pipelineLayout;
-		VkSampleCountFlagBits samples;
 
 		std::vector<PassInstance> instances;
 	};

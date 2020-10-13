@@ -7,6 +7,7 @@
 
 #include <chrono>
 #include <thread>
+#include <cstdint>
 
 #include <VulkanContext.h>
 
@@ -33,7 +34,7 @@ namespace vku {
 
 	protected:
 		std::string windowTitle = "Untitled";
-		uint32_t framerateLimit = 60;
+		double framerateLimit = 120.0;
 		uint32_t width = 800, height = 600;
 		bool debugEnabled = true;
 
@@ -55,7 +56,7 @@ namespace vku {
 			info.width = width;
 			info.height = height;
 			info.debugEnabled = debugEnabled;
-			info.haltOnValidationError = true;
+			info.haltOnValidationError = false;
 
 			const auto& resizeCallback = [this](GLFWwindow* window, int width, int height) { framebufferResized = true; };
 			const auto& resizeCallbackFunc = std::function<void(GLFWwindow*, int, int)>(resizeCallback);
@@ -86,27 +87,19 @@ namespace vku {
 		}
 
 		void loop() {
-			std::chrono::system_clock::time_point a = std::chrono::system_clock::now();
-			std::chrono::system_clock::time_point b = std::chrono::system_clock::now();
-			std::chrono::duration<double, std::milli> elapsed;
-			double ms = 1000.0 / static_cast<double>(framerateLimit);
+			using clock = std::chrono::steady_clock;
+			auto next_frame = clock::now();
+			const auto step = std::chrono::milliseconds((int)(1000.0 / framerateLimit));
 
 			while (!glfwWindowShouldClose(context->windowHandle)) {
-				// framerate limiting code
-				a = std::chrono::system_clock::now();
-				elapsed = a - b;
-				if (elapsed.count() < ms)
-				{
-					std::chrono::duration<double, std::milli> delta_ms(ms - elapsed.count());
-					auto delta_ms_duration = std::chrono::duration_cast<std::chrono::milliseconds>(delta_ms);
-					std::this_thread::sleep_for(std::chrono::milliseconds(delta_ms_duration.count()));
-				}
-				elapsed = std::chrono::system_clock::now() - b;
-				b = std::chrono::system_clock::now();
+				// framerate limiting
+				next_frame += step;
+				std::this_thread::sleep_until(next_frame);
+
+
 				glfwPollEvents();
 
 				VulkanSwapchain& swapchain = *context->device->swapchain;
-
 				{
 					vkWaitForFences(*context->device, 1, &swapchain.inFlightFences[currentFrame], VK_TRUE, UINT64_MAX);
 
@@ -150,14 +143,6 @@ namespace vku {
 					if (vkQueueSubmit(context->device->graphicsQueue, 1, &submitInfo, swapchain.inFlightFences[currentFrame]) != VK_SUCCESS) {
 						throw std::runtime_error("Failed to submit draw command buffer!");
 					}
-
-					VkSubpassDependency dependency{};
-					dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
-					dependency.dstSubpass = 0;
-					dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-					dependency.srcAccessMask = 0;
-					dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-					dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
 
 					VkPresentInfoKHR presentInfo{};
 					presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;

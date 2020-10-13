@@ -5,24 +5,30 @@
 
 #include <vulkan/vulkan.h>
 
+#include "VulkanShader.h"
 #include "VulkanDescriptorSet.h"
 
 namespace vku {
 	struct Scene;
 	struct VulkanTexture;
 	struct VulkanDevice;
-	struct VulkanShader;
 	struct VulkanDescriptorSet;
 	struct VulkanDescriptorSetLayout;
 	struct Pass;
 
+	struct ShaderInfo {
+		std::string filename;
+		VkShaderStageFlagBits stage;
+		std::vector<ShaderMacro> macros;
+	};
+
 	struct VulkanMaterialInfo {
-		VkGraphicsPipelineCreateInfo pipelineInfo{};
+		VkGraphicsPipelineCreateInfo pipeline{};
 
 		VkPipelineInputAssemblyStateCreateInfo inputAssembly{};
 		VkVertexInputBindingDescription vertexBindingDescription;
 		std::vector<VkVertexInputAttributeDescription> vertexAttributeDescriptions;
-		VkPipelineVertexInputStateCreateInfo vertexInputInfo{};
+		VkPipelineVertexInputStateCreateInfo vertexInput{};
 		VkViewport viewport{};
 		VkRect2D scissor{};
 		VkPipelineViewportStateCreateInfo viewportState{};
@@ -40,14 +46,11 @@ namespace vku {
 
 		std::vector<VkPushConstantRange> pushConstRanges{};
 
+		std::vector<ShaderInfo> shaderStages;
+
 		VulkanDevice* device;
 
 		VulkanMaterialInfo(VulkanDevice* const device);
-	};
-
-	struct ShaderInfo {
-		std::string filename;
-		VkShaderStageFlagBits stage;
 	};
 
 	struct VulkanMaterial {
@@ -56,9 +59,9 @@ namespace vku {
 		VkPipeline pipeline;
 		VkPipelineLayout pipelineLayout;
 
-		VulkanDescriptorSetLayout *descriptorSetLayout;
+		VulkanDescriptorSetLayout* descriptorSetLayout;
 
-		VulkanMaterial(VulkanMaterialInfo* const matInfo, Scene* const scene, Pass* const pass, const std::vector<ShaderInfo> shaderStageInfo);
+		VulkanMaterial(VulkanMaterialInfo* const matInfo, Scene* const scene, Pass* const pass);
 
 		VulkanMaterial() {}
 

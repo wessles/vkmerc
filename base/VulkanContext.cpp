@@ -14,9 +14,6 @@ namespace vku {
 		VulkanContext* context = static_cast<VulkanContext*>(pUserData);
 		if (context->haltOnValidationError) {
 			std::cerr << "Halting on validation error." << std::endl;
-#ifdef _MSC_VER
-			__debugbreak();
-#endif
 			std::cin.get();
 		}
 		return VK_TRUE;

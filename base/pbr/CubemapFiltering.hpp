@@ -182,15 +182,15 @@ namespace vku {
 		pipelineBuilder.depthStencil.depthTestEnable = VK_FALSE;
 		pipelineBuilder.depthStencil.depthBoundsTestEnable = VK_FALSE;
 		pipelineBuilder.depthStencil.stencilTestEnable = VK_FALSE;
-		pipelineBuilder.viewport.width = dim;
-		pipelineBuilder.viewport.height = dim;
+		pipelineBuilder.viewport.width = static_cast<float>(dim);
+		pipelineBuilder.viewport.height = static_cast<float>(dim);
 		pipelineBuilder.scissor.extent = { dim, dim };
 		pipelineBuilder.dynamicState.dynamicStateCount = 0;
 
 		std::vector<VkPipelineShaderStageCreateInfo> shaderStages{};
 		shaderStages.resize(2);
-		pipelineBuilder.pipelineInfo.stageCount = 2;
-		pipelineBuilder.pipelineInfo.pStages = shaderStages.data();
+		pipelineBuilder.pipeline.stageCount = 2;
+		pipelineBuilder.pipeline.pStages = shaderStages.data();
 
 		// Look-up-table (from BRDF) pipeline
 		VulkanShader* vertStageModule = new VulkanShader(device, lazyLoadSpirv(cubemapFilterParams.filterVertShader));
@@ -198,11 +198,11 @@ namespace vku {
 		VulkanShader* fragStageModule = new VulkanShader(device, lazyLoadSpirv(cubemapFilterParams.filterFragShader));
 		shaderStages[1] = fragStageModule->getShaderStage(VK_SHADER_STAGE_FRAGMENT_BIT);
 
-		pipelineBuilder.pipelineInfo.layout = pipelinelayout;
-		pipelineBuilder.pipelineInfo.renderPass = renderpass;
+		pipelineBuilder.pipeline.layout = pipelinelayout;
+		pipelineBuilder.pipeline.renderPass = renderpass;
 
 		VkPipeline pipeline;
-		if (vkCreateGraphicsPipelines(*device, nullptr, 1, &pipelineBuilder.pipelineInfo, nullptr, &pipeline) != VK_SUCCESS) {
+		if (vkCreateGraphicsPipelines(*device, nullptr, 1, &pipelineBuilder.pipeline, nullptr, &pipeline) != VK_SUCCESS) {
 			throw std::runtime_error("Failed to create graphics pipeline.");
 		}
 
@@ -243,7 +243,7 @@ namespace vku {
 		VkCommandBuffer cmdBuf = device->beginCommandBuffer(true);
 		{
 			VkViewport viewport{};
-			viewport.width = viewport.height = dim;
+			viewport.width = viewport.height = static_cast<float>(dim);
 			viewport.minDepth = 0.0f;
 			viewport.maxDepth = 1.0f;
 			VkRect2D scissor{};
@@ -344,7 +344,7 @@ namespace vku {
 		pushBlocks.resize(numMips);
 		std::vector<void*> pushBlockPtrs{};
 		pushBlockPtrs.resize(numMips);
-		for (int i = 0; i < numMips; i++) {
+		for (uint32_t i = 0; i < numMips; i++) {
 			pushBlockPtrs[i] = &pushBlocks[i];
 		}
 
@@ -377,7 +377,7 @@ namespace vku {
 		pushBlocks.resize(numMips);
 		std::vector<void*> pushBlockPtrs{};
 		pushBlockPtrs.resize(numMips);
-		for (int i = 0; i < numMips; i++) {
+		for (uint32_t i = 0; i < numMips; i++) {
 			pushBlocks[i].roughness = (float)i / (float)(numMips - 1);
 			pushBlocks[i].numSamples = 128u;
 			pushBlockPtrs[i] = &pushBlocks[i];

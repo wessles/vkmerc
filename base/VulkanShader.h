@@ -10,7 +10,9 @@
 namespace vku {
 	struct VulkanDevice;
 
-	struct VulkanShaderMacroDefs 
+	struct VulkanShaderInfo {
+		std::string file;
+	};
 
 	struct VulkanShader {
 		VulkanDevice* device;
@@ -23,9 +25,14 @@ namespace vku {
 		operator VkShaderModule () const { return handle; }
 	};
 
+	struct ShaderMacro {
+		std::string name;
+		std::string value;
+	};
+
 	/*
 	Loads spirv shader binary. Before doing so, compiles glsl file
 	at path IF spv is nonexistent or out of date.
 	*/
-	std::vector<uint32_t> lazyLoadSpirv(const std::string& path);
+	std::vector<uint32_t> lazyLoadSpirv(const std::string& path, std::vector<ShaderMacro> macros = {});
 }

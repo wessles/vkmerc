@@ -33,20 +33,13 @@
 using namespace std;
 using namespace vku;
 
-struct Shadowmap1CascadeUniform {
-	glm::mat4 cascade0;
-};
-struct Shadowmap2CascadeUniform {
-	glm::mat4 cascade0, cascade1;
-};
-
 class Engine : public BaseEngine {
 	const uint32_t shadowmapDimensions = 256;
 
 public:
 	Engine() {
-		this->windowTitle = "Cube";
-		this->debugEnabled = false;
+		this->windowTitle = "Empty";
+		//this->debugEnabled = false;
 		this->width = 900;
 		this->height = 900;
 	}
@@ -56,21 +49,11 @@ public:
 
 	RenderGraph* graph;
 	Pass* main;
-	Pass* cascades;
-
-	VulkanGltfModel* gltf;
-	VulkanTexture* brdf;
-	VulkanTexture* irradiancemap;
-	VulkanTexture* specmap;
 
 	VulkanTexture* skybox;
 	VulkanMeshBuffer* boxMeshBuf;
 	VulkanMaterial* mat;
 	VulkanMaterialInstance* matInst;
-
-	std::vector<VulkanUniform*> cascadeUniform;
-	VulkanMaterial* depthOnlyMat;
-	VulkanMaterialInstance* depthOnlyMatInst;
 
 	std::vector<VkCommandBuffer> cmdBufs;
 
@@ -100,37 +83,18 @@ public:
 
 		flycam = new OrbitCam(context->windowHandle);
 
-		cascadeUniform.resize(context->device->swapchain->swapChainLength);
-		for (uint32_t i = 0; i < cascadeUniform.size(); i++) {
-			cascadeUniform[i] = new VulkanUniform(context->device, sizeof(Shadowmap1CascadeUniform));
-		}
-
 		graph = new RenderGraph(scene, context->device->swapchain->swapChainLength);
 		{
-			cascades = graph->pass([&](uint32_t i, const VkCommandBuffer& cb) {
-				depthOnlyMatInst->bind(cb, i);
-				depthOnlyMatInst->material->bind(cb);
-
-				scene->render(cb, i, true);
-			});
-
 			main = graph->pass([&](uint32_t i, const VkCommandBuffer& cb) {
 				matInst->bind(cb, i);
 				matInst->material->bind(cb);
 				boxMeshBuf->draw(cb);
 
-				scene->render(cb, i, false);
+				//scene->render(cb, i, false);
 			});
 
 			graph->begin(main);
 			graph->terminate(main);
-
-			Attachment* shadowmap = graph->attachment(cascades, { main });
-			shadowmap->format = context->device->swapchain->depthFormat;
-			shadowmap->samples = VK_SAMPLE_COUNT_1_BIT;
-			shadowmap->sizeToSwapchain = false;
-			shadowmap->width = shadowmapDimensions;
-			shadowmap->height = shadowmapDimensions;
 
 			Attachment* edge = graph->attachment(main, {});
 			edge->format = context->device->swapchain->screenFormat;
@@ -144,28 +108,17 @@ public:
 		}
 		graph->createLayouts();
 
-		brdf = generateBRDFLUT(context->device);
-		irradiancemap = generateIrradianceCube(context->device, skybox);
-		specmap = generatePrefilteredCube(context->device, skybox);
-		gltf = new VulkanGltfModel("res/demo/DamagedHelmet.glb", scene, main, brdf, irradiancemap, specmap);
-		scene->addObject(gltf);
 
 		// skyboxes don't care about depth testing / writing
 		VulkanMaterialInfo matInfo(context->device);
 		matInfo.depthStencil.depthWriteEnable = false;
 		matInfo.depthStencil.depthTestEnable = false;
 		matInfo.rasterizer.frontFace = VK_FRONT_FACE_CLOCKWISE;
-		mat = new VulkanMaterial(&matInfo, scene, main, {
-			{"res/shaders/skybox/skybox.frag", VK_SHADER_STAGE_FRAGMENT_BIT},
-			{"res/shaders/skybox/skybox.vert", VK_SHADER_STAGE_VERTEX_BIT} }
-		);
+		matInfo.shaderStages.push_back({ "res/shaders/skybox/skybox.frag", VK_SHADER_STAGE_FRAGMENT_BIT, {} });
+		matInfo.shaderStages.push_back({ "res/shaders/skybox/skybox.vert", VK_SHADER_STAGE_VERTEX_BIT, {} });
+		mat = new VulkanMaterial(&matInfo, scene, main);
 		matInst = new VulkanMaterialInstance(mat);
 		for (VulkanDescriptorSet* set : matInst->descriptorSets) { set->write(0, skybox); }
-
-		// depth only pipeline
-		VulkanMaterialInfo matInfoDepth(context->device);
-		depthOnlyMat = new VulkanMaterial(&matInfoDepth, scene, cascades, { {"res/shaders/shadowpass/shadowpass.vert", VK_SHADER_STAGE_VERTEX_BIT} });
-		depthOnlyMatInst = new VulkanMaterialInstance(depthOnlyMat);
 
 		buildSwapchainDependants();
 	}
@@ -178,7 +131,7 @@ public:
 		static auto startTime = std::chrono::high_resolution_clock::now();
 		auto currentTime = std::chrono::high_resolution_clock::now();
 		float time = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
-		
+
 		float n = 0.01f;
 		float f = 5.0f;
 		float half = (n + f) / 2.0f;
@@ -194,24 +147,12 @@ public:
 		global.time = time;
 		global.directionalLight = glm::rotate(glm::mat4(1.0), time, glm::vec3(0.0, 1.0, 0.0)) * glm::vec4(1.0, -1.0, 0.0, 0.0);
 
-		glm::mat4 subfrust0 = glm::inverse(flycam->getProjMatrix(static_cast<float>(swapchainExtent.width), static_cast<float>(swapchainExtent.height), n, quarter));
-		glm::mat4 subfrust1 = glm::inverse(flycam->getProjMatrix(static_cast<float>(swapchainExtent.width), static_cast<float>(swapchainExtent.height), quarter, half));
-		glm::mat4 subfrust2 = glm::inverse(flycam->getProjMatrix(static_cast<float>(swapchainExtent.width), static_cast<float>(swapchainExtent.height), half, f));
-		global.cascade0 = fitLightProjMatToCameraFrustum(subfrust0, global.directionalLight, shadowmapDimensions);
-		global.cascade1 = fitLightProjMatToCameraFrustum(subfrust1, global.directionalLight, shadowmapDimensions);
-		global.cascade2 = fitLightProjMatToCameraFrustum(subfrust2, global.directionalLight, shadowmapDimensions);
-
 		scene->updateUniforms(i, &global);
 	}
 
 	VkCommandBuffer draw(uint32_t i)
 	{
 		updateUniforms(i);
-
-		vkFreeCommandBuffers(*context->device, context->device->commandPool, 1, &cmdBufs[i]);
-		cmdBufs[i] = context->device->beginCommandBuffer();
-		graph->render(cmdBufs[i], i);
-		vkEndCommandBuffer(cmdBufs[i]);
 
 		return cmdBufs[i];
 	}
@@ -240,14 +181,7 @@ public:
 		delete matInst;
 		delete mat;
 
-		delete depthOnlyMatInst;
-		delete depthOnlyMat;
-
 		delete flycam;
-
-		delete brdf;
-		delete irradiancemap;
-		delete specmap;
 
 		graph->destroyLayouts();
 		delete scene;

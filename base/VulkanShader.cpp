@@ -13,6 +13,8 @@
 #include <fstream>
 #include <string>
 #include <vector>
+#include <iomanip>
+#include <sstream>
 
 #include <shaderc/shaderc.hpp>
 #include <vulkan/vulkan.h>
@@ -103,8 +105,21 @@ namespace vku {
 	Loads spirv shader binary. Before doing so, compiles glsl file
 	at path IF spv is nonexistent or out of date.
 	*/
-	std::vector<uint32_t> lazyLoadSpirv(const std::string& path) {
-		const std::string spvPath = path + ".spv";
+	std::vector<uint32_t> lazyLoadSpirv(const std::string& path, std::vector<ShaderMacro> macros) {
+		// generate unique hash for path/macro combination (order dependent on macros)
+		auto strhash = std::hash<std::string>();
+		size_t shaderTypeHash = 0x0;
+		for (ShaderMacro macro : macros) {
+			shaderTypeHash = shaderTypeHash ^ strhash(macro.name + "=" + macro.value);
+		}
+
+		// convert to hex
+		std::stringstream stream;
+		stream << std::hex << shaderTypeHash;
+		std::string result(stream.str());
+
+		// spv path looks like .../myshader-ff35eca1c3.spv
+		std::string spvPath = path + "." + result + ".spv";
 
 		struct stat statResult;
 
@@ -139,6 +154,9 @@ namespace vku {
 
 			shaderc::Compiler compiler{};
 			shaderc::CompileOptions options{};
+			for (auto macro : macros) {
+				options.AddMacroDefinition(macro.name, macro.value);
+			}
 			options.SetWarningsAsErrors();
 			shaderc::SpvCompilationResult result = compiler.CompileGlslToSpv(glslSource, shaderType, path.c_str(), options);
 			if (result.GetCompilationStatus() != shaderc_compilation_status_success) {

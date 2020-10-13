@@ -214,10 +214,9 @@ namespace vku {
 				VulkanMaterialInstance*& materialInstance = materialInstances[i];
 
 				VulkanMaterialInfo info(scene->device);
-				material = new VulkanMaterial(&info, scene, pass, {
-					{"res/shaders/pbr/pbr.vert", VK_SHADER_STAGE_VERTEX_BIT},
-					{"res/shaders/pbr/pbr.frag", VK_SHADER_STAGE_FRAGMENT_BIT}
-					});
+				info.shaderStages.push_back({ "res/shaders/pbr/pbr.vert", VK_SHADER_STAGE_VERTEX_BIT });
+				info.shaderStages.push_back({ "res/shaders/pbr/pbr.frag", VK_SHADER_STAGE_FRAGMENT_BIT });
+				material = new VulkanMaterial(&info, scene, pass);
 
 				materialInstance = new VulkanMaterialInstance(material);
 

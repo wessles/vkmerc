@@ -149,15 +149,15 @@ namespace vku {
 		pipelineBuilder.scissor.extent = { dim,dim };
 
 		// No vertex input
-		VkPipelineVertexInputStateCreateInfo& vInputState = pipelineBuilder.vertexInputInfo;
+		VkPipelineVertexInputStateCreateInfo& vInputState = pipelineBuilder.vertexInput;
 		vInputState.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
 		vInputState.vertexAttributeDescriptionCount = 0;
 		vInputState.vertexBindingDescriptionCount = 0;
 
 		std::vector<VkPipelineShaderStageCreateInfo> shaderStages{};
 		shaderStages.resize(2);
-		pipelineBuilder.pipelineInfo.stageCount = 2;
-		pipelineBuilder.pipelineInfo.pStages = shaderStages.data();
+		pipelineBuilder.pipeline.stageCount = 2;
+		pipelineBuilder.pipeline.pStages = shaderStages.data();
 
 		// Look-up-table (from BRDF) pipeline
 		VulkanShader* vertStageModule = new VulkanShader(device, lazyLoadSpirv("res/shaders/pbr_gen/genbrdflut.vert"));
@@ -165,11 +165,11 @@ namespace vku {
 		VulkanShader* fragStageModule = new VulkanShader(device, lazyLoadSpirv("res/shaders/pbr_gen/genbrdflut.frag"));
 		shaderStages[1] = fragStageModule->getShaderStage(VK_SHADER_STAGE_FRAGMENT_BIT);
 
-		pipelineBuilder.pipelineInfo.layout = pipelinelayout;
-		pipelineBuilder.pipelineInfo.renderPass = renderpass;
+		pipelineBuilder.pipeline.layout = pipelinelayout;
+		pipelineBuilder.pipeline.renderPass = renderpass;
 
 		VkPipeline pipeline;
-		if (vkCreateGraphicsPipelines(*device, nullptr, 1, &pipelineBuilder.pipelineInfo, nullptr, &pipeline) != VK_SUCCESS) {
+		if (vkCreateGraphicsPipelines(*device, nullptr, 1, &pipelineBuilder.pipeline, nullptr, &pipeline) != VK_SUCCESS) {
 			throw std::runtime_error("Failed to create graphics pipeline!");
 		}
 

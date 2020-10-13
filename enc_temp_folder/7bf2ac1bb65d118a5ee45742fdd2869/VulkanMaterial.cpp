@@ -139,7 +139,6 @@ namespace vku {
 
 		matInfo->pipeline.subpass = 0;
 		matInfo->pipeline.renderPass = pass->pass;
-		matInfo->multisampling.rasterizationSamples = pass->samples;
 
 		// load shaders into the pipeline state, and analyze shader for expected descriptors
 		for (const ShaderInfo& info : matInfo->shaderStages) {
