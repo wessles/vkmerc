@@ -8,6 +8,69 @@
 
 
 namespace vku {
+
+	// RenderGraph Schema
+	///
+
+	struct AttachmentSchema;
+
+	struct PassSchema {
+		std::string name;
+
+		std::vector<AttachmentSchema*> in;
+		std::vector<AttachmentSchema*> out;
+
+		VkSampleCountFlagBits samples = VK_SAMPLE_COUNT_1_BIT;
+
+		std::function<void(const uint32_t, const VkCommandBuffer&)> commands;
+		
+		PassSchema(const std::string name) {
+			this->name = name;
+		}
+	};
+
+	struct AttachmentSchema {
+		std::string name;
+
+		PassSchema* from;
+		std::vector<PassSchema*> to;
+
+		VkFormat format;
+		VkSampleCountFlagBits samples = VK_SAMPLE_COUNT_1_BIT;
+
+		// if so, no image will be created for this attachment, and the corresponding swapchain will be assumed as its image
+		bool isSwapchain = false;
+
+		// attachment does not get read later, it's only read by the pipeline internally
+		bool isTransient = false;
+
+		// this is a very specific term referring to the vulkan spec. An "incoming attachment" is usually *not* an input attachment.
+		bool isInputAttachment = false;
+
+		bool isSampled = false;
+
+		// by setting to a negative value, you are setting the dimension to equal floor(-swapchain.width / -1). You can do half resolution by setting width = -2
+		int width = -1, height = -1;
+
+		AttachmentSchema(const std::string name) {
+			this->name = name;
+		}
+	};
+
+	struct RenderGraphSchema {
+		std::vector<PassSchema*> nodes;
+		std::vector<AttachmentSchema*> edges;
+
+		RenderGraphSchema();
+		~RenderGraphSchema();
+
+		PassSchema* pass(const std::string& name, std::function<void(const uint32_t, const VkCommandBuffer&)> commands);
+		AttachmentSchema* attachment(const std::string& name, PassSchema* from, std::vector<PassSchema*> to);
+	};
+
+	// RenderGraph
+	///
+
 	struct Scene;
 	struct VulkanDevice;
 	struct VulkanTexture;
@@ -23,34 +86,32 @@ namespace vku {
 		VulkanTexture* texture;
 	};
 
+	struct RenderGraph;
+
 	struct Attachment;
 	struct Pass {
 		std::vector<Attachment*> in;
 		std::vector<Attachment*> out;
 
-		std::function<void(const uint32_t, const VkCommandBuffer&)> commands;
+		// this will be set during the createInstances function, based on outgoing edge dimensions (which must be equal)
+		uint32_t width, height;
+
+		const PassSchema* schema;
 
 		VkRenderPass pass;
 		VulkanDescriptorSetLayout* inputLayout;
 		VkPipelineLayout pipelineLayout;
-		VkSampleCountFlagBits samples;
 
 		std::vector<PassInstance> instances;
 	};
 
 	struct Attachment {
-		Pass* from;
 		std::vector<Pass*> to;
-		VkFormat format;
-		VkSampleCountFlagBits samples;
-		bool transient;
-		bool isSwapchain;
 
-		bool inputAttachment = false;
+		// this will be set during the createInstances function, based on schema and (optionally) swapchain dimensions
+		uint32_t width, height;
 
-		bool sizeToSwapchain = true;
-		uint32_t width = -1;
-		uint32_t height = -1;
+		const AttachmentSchema* schema;
 
 		std::vector<AttachmentInstance> instances;
 	};
@@ -58,9 +119,8 @@ namespace vku {
 	class RenderGraph {
 		std::vector<Pass*> nodes;
 		std::vector<Attachment*> edges;
-		Pass* start;
-		Pass* end;
 
+		RenderGraphSchema* schema;
 		Scene* scene;
 		VulkanDevice* device;
 
@@ -68,14 +128,11 @@ namespace vku {
 		uint32_t numInstances;
 
 	public:
-		RenderGraph(Scene* scene, uint32_t numInstances);
+		RenderGraph(RenderGraphSchema* schema, Scene* scene, uint32_t numInstances);
 		~RenderGraph();
 
-		Pass* pass(std::function<void(const uint32_t, const VkCommandBuffer&)> commands);
-		Attachment* attachment(Pass* from, std::vector<Pass*> to);
-
-		void begin(Pass* node);
-		void terminate(Pass* node);
+		Pass* getPass(const std::string& name);
+		Attachment* getAttachment(const std::string& name);
 
 		void render(VkCommandBuffer cmdbuf, uint32_t i);
 

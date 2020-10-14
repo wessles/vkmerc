@@ -45,6 +45,7 @@ public:
 	OrbitCam* flycam;
 	Scene* scene;
 
+	RenderGraphSchema* graphSchema;
 	RenderGraph* graph;
 	Pass* main;
 
@@ -86,30 +87,32 @@ public:
 
 		flycam = new OrbitCam(context->windowHandle);
 
-		graph = new RenderGraph(scene, context->device->swapchain->swapChainLength);
+		graphSchema = new RenderGraphSchema();
 		{
-			main = graph->pass([&](uint32_t i, const VkCommandBuffer& cb) {
+			PassSchema *main = graphSchema->pass("main", [&](uint32_t i, const VkCommandBuffer& cb) {
 				matInst->bind(cb, i);
 				matInst->material->bind(cb);
 				boxMeshBuf->draw(cb);
 
 				scene->render(cb, i, false);
 			});
+			main->samples = VK_SAMPLE_COUNT_4_BIT;
 
-			graph->begin(main);
-			graph->terminate(main);
-
-			Attachment* edge = graph->attachment(main, {});
+			AttachmentSchema* edge = graphSchema->attachment("color", main, {});
 			edge->format = context->device->swapchain->screenFormat;
 			edge->samples = VK_SAMPLE_COUNT_4_BIT;
 			edge->isSwapchain = true;
 
-			Attachment* depth = graph->attachment(main, {});
+			AttachmentSchema* depth = graphSchema->attachment("depth", main, {});
 			depth->format = context->device->swapchain->depthFormat;
 			depth->samples = VK_SAMPLE_COUNT_4_BIT;
-			depth->transient = true;
+			depth->isTransient = true;
 		}
+
+		graph = new RenderGraph(graphSchema, scene, context->device->swapchain->swapChainLength);
 		graph->createLayouts();
+
+		main = graph->getPass("main");
 
 		brdf = generateBRDFLUT(context->device);
 		irradiancemap = generateIrradianceCube(context->device, skybox);

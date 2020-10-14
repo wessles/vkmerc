@@ -11,10 +11,68 @@
 #include "VulkanTexture.h"
 
 namespace vku {
-	RenderGraph::RenderGraph(Scene* scene, uint32_t numInstances) {
+	RenderGraphSchema::RenderGraphSchema() {}
+	RenderGraphSchema::~RenderGraphSchema() {
+		for (auto* att : edges)
+			delete att;
+		for (auto* pass : nodes)
+			delete pass;
+	}
+	PassSchema* RenderGraphSchema::pass(const std::string& name, std::function<void(const uint32_t, const VkCommandBuffer&)> commands) {
+		PassSchema* node = new PassSchema(name);
+		node->commands = commands;
+		nodes.push_back(node);
+		return node;
+	}
+	AttachmentSchema* RenderGraphSchema::attachment(const std::string& name, PassSchema* from, std::vector<PassSchema*> to) {
+		AttachmentSchema* edge = new AttachmentSchema(name);
+		edge->from = from;
+		edge->to = to;
+
+		if (edge->from != nullptr) {
+			edge->from->out.push_back(edge);
+		}
+
+		for (PassSchema* node : edge->to) {
+			node->in.push_back(edge);
+		}
+
+		edges.push_back(edge);
+		return edge;
+	}
+
+	RenderGraph::RenderGraph(RenderGraphSchema* schema, Scene* scene, uint32_t numInstances) {
 		this->scene = scene;
 		this->device = scene->device;
 		this->numInstances = numInstances;
+		this->schema = schema;
+
+		// allocate passes and attachments
+		nodes.resize(schema->nodes.size());
+		for (uint32_t i = 0; i < nodes.size(); i++) {
+			Pass* node = new Pass();
+			node->schema = schema->nodes[i];
+			nodes[i] = node;
+		}
+		edges.resize(schema->edges.size());
+		for (uint32_t i = 0; i < edges.size(); i++) {
+			Attachment* edge = new Attachment();
+			edge->schema = schema->edges[i];
+			edges[i] = edge;
+		}
+
+		// connect them
+		for (uint32_t i = 0; i < nodes.size(); i++) {
+			Pass* passNode = nodes[i];
+			for (auto* edge : passNode->schema->in) {
+				Attachment* att = getAttachment(edge->name);
+				att->to.push_back(passNode);
+				passNode->in.push_back(att);
+			}
+			for (auto* edge : passNode->schema->out) {
+				passNode->out.push_back(getAttachment(edge->name));
+			}
+		}
 	}
 	RenderGraph::~RenderGraph() {
 		for (Pass* node : nodes) {
@@ -25,43 +83,31 @@ namespace vku {
 		}
 	}
 
-	Pass* RenderGraph::pass(std::function<void(const uint32_t, const VkCommandBuffer&)> commands) {
-		Pass* node = new Pass;
-		node->commands = commands;
-		nodes.push_back(node);
-		return node;
-	}
-	Attachment* RenderGraph::attachment(Pass* from, std::vector<Pass*> to) {
-		Attachment* edge = new Attachment();
-		edge->from = from;
-		edge->to = to;
-		if (edge->from != nullptr)
-			edge->from->out.push_back(edge);
-
-		for (Pass* node : edge->to) {
-			node->in.push_back(edge);
+	Pass* RenderGraph::getPass(const std::string& name) {
+		for (auto* node : nodes) {
+			if (node->schema->name == name) {
+				return node;
+			}
 		}
-
-		edges.push_back(edge);
-		return edge;
+		return nullptr;
 	}
-
-	void RenderGraph::begin(Pass* node) {
-		this->start = node;
-	}
-	void RenderGraph::terminate(Pass* node) {
-		this->end = node;
+	Attachment* RenderGraph::getAttachment(const std::string& name) {
+		for (auto* edge : edges) {
+			if (edge->schema->name == name) {
+				return edge;
+			}
+		}
+		return nullptr;
 	}
 
 	void RenderGraph::createLayouts() {
 		// generate singular resources for nodes (renderpass, descriptor set layout) as opposed to the duplicated resources we make later (descriptor set, framebuffer)
-		for (Pass* node : nodes) {
+		for (Pass* passNode : nodes) {
+
+			const PassSchema schema = *passNode->schema;
+
 			// generate one render pass for each node
 			{
-				Pass& current = *node;
-
-				bool isEnd = this->end == &current;
-
 				std::vector<VkAttachmentDescription> attachments;
 				std::vector<VkAttachmentReference> inputRefs;
 				std::vector<VkAttachmentReference> outputRefs;
@@ -70,8 +116,8 @@ namespace vku {
 
 				uint32_t i = 0;
 
-				for (auto& edge : current.in) {
-					if (!edge->inputAttachment) continue;
+				for (auto& edge : schema.in) {
+					if (!edge->isInputAttachment) continue;
 
 					bool isDepth = edge->format == this->device->swapchain->depthFormat;
 
@@ -90,21 +136,12 @@ namespace vku {
 						attachment.initialLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 						attachment.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 					}
-					
+
 					attachments.push_back(attachment);
 					inputRefs.push_back({ i++, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL });
 				}
 
-				uint32_t outgoingNonTransientEdges = 0;
-				for (Attachment* edge : current.out) {
-					if (!edge->transient) ++outgoingNonTransientEdges;
-				}
-
-				if (isEnd && outgoingNonTransientEdges != 1) {
-					throw std::runtime_error("Out node must have *exactly* one outgoing attachment.");
-				}
-
-				for (Attachment* edge : current.out) {
+				for (AttachmentSchema* edge : schema.out) {
 					bool isDepth = edge->format == this->device->swapchain->depthFormat;
 
 					VkAttachmentDescription attachment{};
@@ -207,21 +244,21 @@ namespace vku {
 				if (vkCreateRenderPass(*device, &renderPassCreateInfo, nullptr, &pass) != VK_SUCCESS) {
 					throw std::runtime_error("Failed to create render pass.");
 				}
-				node->pass = pass;
+				passNode->pass = pass;
 			}
 			// generate one descriptor set layout for each node
 			{
 				std::vector<DescriptorLayout> layouts;
-				for (auto& inputEdge : node->in) {
+				for (auto& inputEdge : schema.in) {
 					layouts.push_back({ VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT });
 				}
-				node->inputLayout = new VulkanDescriptorSetLayout(device, layouts);
+				passNode->inputLayout = new VulkanDescriptorSetLayout(device, layouts);
 			}
 			// generate one pipeline layout for each node (must be a subset of all pipeline layouts hereafter)
 			{
 				std::vector<VkDescriptorSetLayout> layouts = {
-					*scene->globalDescriptorSetLayout,
-					*node->inputLayout
+					scene->globalDescriptorSetLayout->handle,
+					passNode->inputLayout->handle
 				};
 
 				// transformation matrix push constant
@@ -237,7 +274,7 @@ namespace vku {
 				pipelineLayoutInfo.pushConstantRangeCount = 1;
 				pipelineLayoutInfo.pPushConstantRanges = &transformPushConst;
 
-				VkResult result = vkCreatePipelineLayout(*device, &pipelineLayoutInfo, nullptr, &node->pipelineLayout);
+				VkResult result = vkCreatePipelineLayout(*device, &pipelineLayoutInfo, nullptr, &passNode->pipelineLayout);
 				if (result != VK_SUCCESS) {
 					throw std::runtime_error("Failed to create pipeline layout for material!");
 				}
@@ -267,13 +304,26 @@ namespace vku {
 			{
 				VkExtent2D& screen = device->swapchain->swapChainExtent;
 				for (Attachment* edge : this->edges) {
-					if (edge->isSwapchain) {
-						edge->width = screen.width;
-						edge->height = screen.height;
+					const AttachmentSchema* schema = edge->schema;
+
+					if (schema->width < 0) {
+						edge->width = -static_cast<int>(screen.width) / static_cast<int>(schema->width);
+					}
+					else {
+						edge->width = schema->width;
+					}
+					if (schema->height < 0) {
+						edge->height = -static_cast<int>(screen.height) / static_cast<int>(schema->height);
+					}
+					else {
+						edge->height = schema->height;
+					}
+
+					if (schema->isSwapchain) {
 						continue;
 					}
 
-					bool isDepth = edge->format == device->swapchain->depthFormat;
+					bool isDepth = schema->format == device->swapchain->depthFormat;
 
 					VkImageUsageFlags usage;
 					VkImageAspectFlags aspect;
@@ -287,26 +337,20 @@ namespace vku {
 					}
 
 					// transient means that the data never leaves the GPU (like a depth buffer)
-					if (edge->transient)
+					if (schema->isTransient)
 						usage |= VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT;
 
-					bool isInput = edge->to.size() > 0 && !edge->transient;
-					if (isInput)
-						usage |= VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+					if (schema->isInputAttachment)
+						usage |= VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT;
+
+					if (schema->isSampled)
+						usage |= VK_IMAGE_USAGE_SAMPLED_BIT;
 
 					VulkanImageInfo imageInfo{};
-					if (edge->sizeToSwapchain) {
-						imageInfo.width = screen.width;
-						imageInfo.height = screen.height;
-						edge->width = screen.width;
-						edge->height = screen.height;
-					}
-					else {
-						imageInfo.width = edge->width;
-						imageInfo.height = edge->height;
-					}
-					imageInfo.numSamples = edge->samples;
-					imageInfo.format = edge->format;
+					imageInfo.width = edge->width;
+					imageInfo.height = edge->height;
+					imageInfo.numSamples = schema->samples;
+					imageInfo.format = schema->format;
 					imageInfo.usage = usage;
 
 					VulkanImageViewInfo imageViewInfo{};
@@ -333,8 +377,6 @@ namespace vku {
 				for (Pass* node : this->nodes) {
 					Pass& current = *node;
 
-					bool isEnd = this->end == &current;
-
 					// (Part II.A) create descriptor set based on layout
 					{
 						node->instances[i].descriptorSet = new VulkanDescriptorSet(current.inputLayout);
@@ -344,26 +386,32 @@ namespace vku {
 						std::vector<VkImageView> attachmentImageViews;
 
 						for (auto& edge : current.in) {
-							if(edge->inputAttachment)
+							const AttachmentSchema* schema = edge->schema;
+
+							if (schema->isInputAttachment)
 								attachmentImageViews.push_back(*edge->instances[i].texture->view);
 						}
-						uint32_t width = -1, height = -1;
+
 						for (auto& edge : current.out) {
-							width = edge->width;
-							height = edge->height;
-							if (edge->isSwapchain)
+							const AttachmentSchema* schema = edge->schema;
+							if (schema->isSwapchain)
 								attachmentImageViews.push_back(*device->swapchain->swapChainImageViews[i]);
 							else
 								attachmentImageViews.push_back(*edge->instances[i].texture->view);
 						}
+
+						// 1. all nodes have at least one outgoing attachment
+						// 2. all outgoing attachments and input attachments have identical dimensions
+						node->width = current.out[0]->width;
+						node->height = current.out[0]->height;
 
 						VkFramebufferCreateInfo framebufferCreate{};
 						framebufferCreate.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
 						framebufferCreate.renderPass = node->pass;
 						framebufferCreate.attachmentCount = static_cast<uint32_t>(attachmentImageViews.size());
 						framebufferCreate.pAttachments = attachmentImageViews.data();
-						framebufferCreate.width = width;
-						framebufferCreate.height = height;
+						framebufferCreate.width = node->width;
+						framebufferCreate.height = node->height;
 						framebufferCreate.layers = 1;
 
 						if (vkCreateFramebuffer(*device, &framebufferCreate, nullptr, &(node->instances[i].framebuffer)) != VK_SUCCESS) {
@@ -376,10 +424,7 @@ namespace vku {
 		// Now that all nodes have allocated their descriptor sets, let's write input image references to them
 		for (uint32_t i = 0; i < numInstances; i++) {
 			for (Attachment* edge : this->edges) {
-				if (edge->to.size() == 0) continue;
-
-				bool isTransient = edge->to.size() == 1 && edge->to[0] == nullptr;
-				if (isTransient) continue;
+				if (edge->schema->isTransient) continue;
 
 				for (Pass* node : edge->to) {
 					int bindingIndex = -1;
@@ -440,7 +485,6 @@ namespace vku {
 				clearValues.push_back(clear);
 			}
 
-
 			uint32_t width = node->out[0]->width;
 			uint32_t height = node->out[0]->height;
 			viewport.width = width;
@@ -463,7 +507,7 @@ namespace vku {
 
 			vkCmdBeginRenderPass(cmdbuf, &passBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
 			{
-				node->commands(i, cmdbuf);
+				node->schema->commands(i, cmdbuf);
 			}
 			vkCmdEndRenderPass(cmdbuf);
 		}
