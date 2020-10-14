@@ -141,6 +141,10 @@ namespace vku {
 					inputRefs.push_back({ i++, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL });
 				}
 
+				// -1 = not found
+				int swapchainAttachmentToResolve = -1;
+				AttachmentSchema* swapchainAttachmentSchema = nullptr;
+
 				for (AttachmentSchema* edge : schema.out) {
 					bool isDepth = edge->format == this->device->swapchain->depthFormat;
 
@@ -165,8 +169,15 @@ namespace vku {
 					}
 
 					if (edge->isSwapchain) {
-						attachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+						if (edge->resolve) {
+							swapchainAttachmentToResolve = i;
+							swapchainAttachmentSchema = edge;
+						}
+						else {
+							attachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+						}
 					}
+
 					if (isDepth) {
 						if (depthWrite) {
 							throw std::runtime_error("Cannot write to multiple depth attachments!");
@@ -181,13 +192,33 @@ namespace vku {
 					}
 				}
 
+				VkAttachmentReference resolveRef;
+				VkAttachmentReference* resolveRefPtr = nullptr;
+
+				if (swapchainAttachmentToResolve != -1) {
+
+					VkAttachmentDescription colorAttachmentResolve{};
+					colorAttachmentResolve.format = swapchainAttachmentSchema->format;
+					colorAttachmentResolve.samples = VK_SAMPLE_COUNT_1_BIT;
+					colorAttachmentResolve.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+					colorAttachmentResolve.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+					colorAttachmentResolve.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+					colorAttachmentResolve.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+					colorAttachmentResolve.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+					colorAttachmentResolve.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+
+					attachments.push_back(colorAttachmentResolve);
+					resolveRef = { i++, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL };
+					resolveRefPtr = &resolveRef;
+				}
+
 				VkSubpassDescription subpass{};
 				subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
 				subpass.colorAttachmentCount = static_cast<uint32_t>(outputRefs.size());
-
 				subpass.pColorAttachments = outputRefs.data();
 				subpass.inputAttachmentCount = static_cast<uint32_t>(inputRefs.size());
 				subpass.pInputAttachments = inputRefs.data();
+				subpass.pResolveAttachments = resolveRefPtr;
 				if (depthWrite)
 					subpass.pDepthStencilAttachment = &depthOutputRef;
 
@@ -319,7 +350,7 @@ namespace vku {
 						edge->height = schema->height;
 					}
 
-					if (schema->isSwapchain) {
+					if (schema->isSwapchain && !schema->resolve) {
 						continue;
 					}
 
@@ -388,16 +419,30 @@ namespace vku {
 						for (auto& edge : current.in) {
 							const AttachmentSchema* schema = edge->schema;
 
-							if (schema->isInputAttachment)
+							if (schema->isInputAttachment) {
 								attachmentImageViews.push_back(*edge->instances[i].texture->view);
+							}
 						}
+
+						bool resolveAttachmentAtEnd = false;
 
 						for (auto& edge : current.out) {
 							const AttachmentSchema* schema = edge->schema;
-							if (schema->isSwapchain)
-								attachmentImageViews.push_back(*device->swapchain->swapChainImageViews[i]);
-							else
+							if (schema->isSwapchain) {
+								if (schema->resolve) {
+									attachmentImageViews.push_back(*edge->instances[i].texture->view);
+									resolveAttachmentAtEnd = true;
+								} else {
+									attachmentImageViews.push_back(*device->swapchain->swapChainImageViews[i]);
+								}
+							}
+							else {
 								attachmentImageViews.push_back(*edge->instances[i].texture->view);
+							}
+						}
+
+						if (resolveAttachmentAtEnd) {
+							attachmentImageViews.push_back(*device->swapchain->swapChainImageViews[i]);
 						}
 
 						// 1. all nodes have at least one outgoing attachment

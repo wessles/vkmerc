@@ -89,6 +89,8 @@ public:
 
 		graphSchema = new RenderGraphSchema();
 		{
+			VkSampleCountFlagBits msaaCount = VK_SAMPLE_COUNT_8_BIT;
+
 			PassSchema *main = graphSchema->pass("main", [&](uint32_t i, const VkCommandBuffer& cb) {
 				matInst->bind(cb, i);
 				matInst->material->bind(cb);
@@ -96,16 +98,17 @@ public:
 
 				scene->render(cb, i, false);
 			});
-			main->samples = VK_SAMPLE_COUNT_4_BIT;
+			main->samples = msaaCount;
 
 			AttachmentSchema* edge = graphSchema->attachment("color", main, {});
 			edge->format = context->device->swapchain->screenFormat;
-			edge->samples = VK_SAMPLE_COUNT_4_BIT;
+			edge->samples = msaaCount;
 			edge->isSwapchain = true;
+			edge->resolve = true;
 
 			AttachmentSchema* depth = graphSchema->attachment("depth", main, {});
 			depth->format = context->device->swapchain->depthFormat;
-			depth->samples = VK_SAMPLE_COUNT_4_BIT;
+			depth->samples = msaaCount;
 			depth->isTransient = true;
 		}
 

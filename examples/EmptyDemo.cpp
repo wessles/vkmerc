@@ -34,11 +34,9 @@ using namespace std;
 using namespace vku;
 
 class Engine : public BaseEngine {
-	const uint32_t shadowmapDimensions = 256;
-
 public:
 	Engine() {
-		this->windowTitle = "Empty";
+		this->windowTitle = "Empty Demo";
 		//this->debugEnabled = false;
 		this->width = 900;
 		this->height = 900;
@@ -47,6 +45,7 @@ public:
 	OrbitCam* flycam;
 	Scene* scene;
 
+	RenderGraphSchema* graphSchema;
 	RenderGraph* graph;
 	Pass* main;
 
@@ -83,31 +82,35 @@ public:
 
 		flycam = new OrbitCam(context->windowHandle);
 
-		graph = new RenderGraph(scene, context->device->swapchain->swapChainLength);
+		graphSchema = new RenderGraphSchema();
 		{
-			main = graph->pass([&](uint32_t i, const VkCommandBuffer& cb) {
+			VkSampleCountFlagBits msaaCount = VK_SAMPLE_COUNT_8_BIT;
+
+			PassSchema* main = graphSchema->pass("main", [&](uint32_t i, const VkCommandBuffer& cb) {
 				matInst->bind(cb, i);
 				matInst->material->bind(cb);
 				boxMeshBuf->draw(cb);
 
-				//scene->render(cb, i, false);
+				scene->render(cb, i, false);
 			});
+			main->samples = msaaCount;
 
-			graph->begin(main);
-			graph->terminate(main);
-
-			Attachment* edge = graph->attachment(main, {});
+			AttachmentSchema* edge = graphSchema->attachment("color", main, {});
 			edge->format = context->device->swapchain->screenFormat;
-			edge->samples = VK_SAMPLE_COUNT_1_BIT;
+			edge->samples = msaaCount;
 			edge->isSwapchain = true;
+			edge->resolve = true;
 
-			Attachment* depth = graph->attachment(main, {});
+			AttachmentSchema* depth = graphSchema->attachment("depth", main, {});
 			depth->format = context->device->swapchain->depthFormat;
-			depth->samples = VK_SAMPLE_COUNT_1_BIT;
-			depth->transient = true;
+			depth->samples = msaaCount;
+			depth->isTransient = true;
 		}
+
+		graph = new RenderGraph(graphSchema, scene, context->device->swapchain->swapChainLength);
 		graph->createLayouts();
 
+		main = graph->getPass("main");
 
 		// skyboxes don't care about depth testing / writing
 		VulkanMaterialInfo matInfo(context->device);

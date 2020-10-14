@@ -33,16 +33,7 @@
 using namespace std;
 using namespace vku;
 
-struct Shadowmap1CascadeUniform {
-	glm::mat4 cascade0;
-};
-struct Shadowmap2CascadeUniform {
-	glm::mat4 cascade0, cascade1;
-};
-
 class Engine : public BaseEngine {
-	const uint32_t shadowmapDimensions = 256;
-
 public:
 	Engine() {
 		this->windowTitle = "Cascaded Shadowmap Demo";
@@ -54,10 +45,9 @@ public:
 	OrbitCam* flycam;
 	Scene* scene;
 
+	RenderGraphSchema* graphSchema;
 	RenderGraph* graph;
-	Pass* cascades;
 	Pass* main;
-	Pass* blit;
 
 	VulkanGltfModel* gltf;
 	VulkanTexture* brdf;
@@ -68,10 +58,6 @@ public:
 	VulkanMeshBuffer* boxMeshBuf;
 	VulkanMaterial* mat;
 	VulkanMaterialInstance* matInst;
-
-	std::vector<VulkanUniform*> cascadeUniform;
-	std::vector<VulkanMaterial*> cascadeMats;
-	std::vector<VulkanMaterialInstance*> cascadeMatInsts;
 
 	std::vector<VkCommandBuffer> cmdBufs;
 
@@ -101,57 +87,35 @@ public:
 
 		flycam = new OrbitCam(context->windowHandle);
 
-		cascadeUniform.resize(context->device->swapchain->swapChainLength);
-		for (uint32_t i = 0; i < cascadeUniform.size(); i++) {
-			cascadeUniform[i] = new VulkanUniform(context->device, sizeof(Shadowmap1CascadeUniform));
-		}
-
-		graph = new RenderGraph(scene, context->device->swapchain->swapChainLength);
+		graphSchema = new RenderGraphSchema();
 		{
-			cascades = graph->pass([&](uint32_t i, const VkCommandBuffer& cb) {
-				cascadeMatInsts[0]->bind(cb, i);
-				cascadeMatInsts[0]->material->bind(cb);
+			VkSampleCountFlagBits msaaCount = VK_SAMPLE_COUNT_8_BIT;
 
-				scene->render(cb, i, true);
-			});
-
-			main = graph->pass([&](uint32_t i, const VkCommandBuffer& cb) {
+			PassSchema* main = graphSchema->pass("main", [&](uint32_t i, const VkCommandBuffer& cb) {
 				matInst->bind(cb, i);
 				matInst->material->bind(cb);
 				boxMeshBuf->draw(cb);
 
 				scene->render(cb, i, false);
 			});
+			main->samples = msaaCount;
 
-			blit = graph->pass([&](uint32_t i, const VkCommandBuffer& cb) {
-				matInst->bind(cb, i);
-				matInst->material->bind(cb);
-				boxMeshBuf->draw(cb);
-
-				scene->render(cb, i, false);
-			});
-
-			graph->begin(main);
-			graph->terminate(main);
-
-			Attachment* shadowmap = graph->attachment(cascades, { main });
-			shadowmap->format = context->device->swapchain->depthFormat;
-			shadowmap->samples = VK_SAMPLE_COUNT_1_BIT;
-			shadowmap->sizeToSwapchain = false;
-			shadowmap->width = shadowmapDimensions;
-			shadowmap->height = shadowmapDimensions;
-
-			Attachment* edge = graph->attachment(main, {});
+			AttachmentSchema* edge = graphSchema->attachment("color", main, {});
 			edge->format = context->device->swapchain->screenFormat;
-			edge->samples = VK_SAMPLE_COUNT_1_BIT;
+			edge->samples = msaaCount;
 			edge->isSwapchain = true;
+			edge->resolve = true;
 
-			Attachment* depth = graph->attachment(main, {});
+			AttachmentSchema* depth = graphSchema->attachment("depth", main, {});
 			depth->format = context->device->swapchain->depthFormat;
-			depth->samples = VK_SAMPLE_COUNT_1_BIT;
-			depth->transient = true;
+			depth->samples = msaaCount;
+			depth->isTransient = true;
 		}
+
+		graph = new RenderGraph(graphSchema, scene, context->device->swapchain->swapChainLength);
 		graph->createLayouts();
+
+		main = graph->getPass("main");
 
 		brdf = generateBRDFLUT(context->device);
 		irradiancemap = generateIrradianceCube(context->device, skybox);
@@ -169,14 +133,6 @@ public:
 		mat = new VulkanMaterial(&matInfo, scene, main);
 		matInst = new VulkanMaterialInstance(mat);
 		for (VulkanDescriptorSet* set : matInst->descriptorSets) { set->write(0, skybox); }
-
-		// depth only pipeline
-		VulkanMaterialInfo cascadeMatInfo(context->device);
-		cascadeMatInfo.shaderStages.push_back( { "res/shaders/shadowpass/shadowpass.vert", VK_SHADER_STAGE_VERTEX_BIT, {{"CASCADE_0", ""}} } );
-		cascadeMats.resize(1);
-		cascadeMatInsts.resize(1);
-		cascadeMats[0] = new VulkanMaterial(&cascadeMatInfo, scene, cascades);
-		cascadeMatInsts[0] = new VulkanMaterialInstance(cascadeMats[0]);
 
 		buildSwapchainDependants();
 	}
@@ -204,13 +160,6 @@ public:
 		global.screenRes = { swapchainExtent.width, swapchainExtent.height };
 		global.time = time;
 		global.directionalLight = glm::rotate(glm::mat4(1.0), time, glm::vec3(0.0, 1.0, 0.0)) * glm::vec4(1.0, -1.0, 0.0, 0.0);
-
-		//glm::mat4 subfrust0 = glm::inverse(flycam->getProjMatrix(static_cast<float>(swapchainExtent.width), static_cast<float>(swapchainExtent.height), n, quarter));
-		//glm::mat4 subfrust1 = glm::inverse(flycam->getProjMatrix(static_cast<float>(swapchainExtent.width), static_cast<float>(swapchainExtent.height), quarter, half));
-		//glm::mat4 subfrust2 = glm::inverse(flycam->getProjMatrix(static_cast<float>(swapchainExtent.width), static_cast<float>(swapchainExtent.height), half, f));
-		//global.cascade0 = fitLightProjMatToCameraFrustum(subfrust0, global.directionalLight, shadowmapDimensions);
-		//global.cascade1 = fitLightProjMatToCameraFrustum(subfrust1, global.directionalLight, shadowmapDimensions);
-		//global.cascade2 = fitLightProjMatToCameraFrustum(subfrust2, global.directionalLight, shadowmapDimensions);
 
 		scene->updateUniforms(i, &global);
 	}
@@ -245,13 +194,6 @@ public:
 		delete boxMeshBuf;
 		delete matInst;
 		delete mat;
-
-		for (auto* mat : cascadeMats) {
-			delete mat;
-		}
-		for (auto* matInst : cascadeMatInsts) {
-			delete matInst;
-		}
 
 		delete flycam;
 

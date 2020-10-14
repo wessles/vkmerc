@@ -49,6 +49,9 @@ namespace vku {
 
 		bool isSampled = false;
 
+		// resolve MSAA to single sample IF this is the swapchain
+		bool resolve = false;
+
 		// by setting to a negative value, you are setting the dimension to equal floor(-swapchain.width / -1). You can do half resolution by setting width = -2
 		int width = -1, height = -1;
 
