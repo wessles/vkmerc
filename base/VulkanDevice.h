@@ -3,7 +3,8 @@
 #include <optional>
 #include <vector>
 
-#include <vulkan/vulkan.h>
+#include <vulkan/vulkan_core.h>
+#include <vulkan/vulkan_beta.h>
 
 namespace vku {
 	struct VulkanContext;
@@ -15,6 +16,9 @@ namespace vku {
 
 		VkPhysicalDeviceProperties deviceProperties;
 		VkPhysicalDeviceFeatures deviceFeatures;
+		VkAccelerationStructureCreateInfoKHR* p;
+		VkPhysicalDeviceRayTracingFeaturesKHR rtFeatures;
+		VkPhysicalDeviceRayTracingPropertiesKHR rtProps;
 
 		VkSampleCountFlags maxSampleCount;
 	};

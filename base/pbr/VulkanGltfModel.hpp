@@ -12,6 +12,7 @@
 #include "VulkanDevice.h"
 #include "scene/Scene.h"
 #include "scene/Object.h"
+#include "PbrMaterial.h"
 
 
 /*
@@ -44,8 +45,7 @@ namespace vku {
 		VulkanMeshBuffer* meshBuf;
 
 		std::vector<VulkanTexture*> textures;
-		std::vector<VulkanMaterial*> materials;
-		std::vector<VulkanMaterialInstance*> materialInstances;
+		std::vector<PbrMaterial*> materials;
 		std::vector<Node> nodes;
 
 		VulkanGltfModel() {}
@@ -135,7 +135,7 @@ namespace vku {
 				info.width = gImage.width;
 				info.height = gImage.height;
 				info.format = VK_FORMAT_R8G8B8A8_UNORM;
-				info.usage = VK_IMAGE_USAGE_SAMPLED_BIT| VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+				info.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
 				image.image = new VulkanImage(device, info);
 				image.image->loadFromBuffer(stagingBuffer);
 
@@ -206,19 +206,10 @@ namespace vku {
 
 		void loadMaterials(Scene* scene, Pass* pass, tinygltf::Model& model, VulkanTexture* brdf_lut, VulkanTexture* diffuse_ibl, VulkanTexture* specular_ibl) {
 			materials.resize(model.materials.size());
-			materialInstances.resize(model.materials.size());
 
 			for (uint32_t i = 0; i < model.materials.size(); i++) {
 				tinygltf::Material& gMaterial = model.materials[i];
-				VulkanMaterial*& material = materials[i];
-				VulkanMaterialInstance*& materialInstance = materialInstances[i];
-
-				VulkanMaterialInfo info(scene->device);
-				info.shaderStages.push_back({ "res/shaders/pbr/pbr.vert", VK_SHADER_STAGE_VERTEX_BIT });
-				info.shaderStages.push_back({ "res/shaders/pbr/pbr.frag", VK_SHADER_STAGE_FRAGMENT_BIT });
-				material = new VulkanMaterial(&info, scene, pass);
-
-				materialInstance = new VulkanMaterialInstance(material);
+				PbrMaterial*& material = materials[i];
 
 				int colorTexIdx = gMaterial.pbrMetallicRoughness.baseColorTexture.index;
 				int normalTexIdx = gMaterial.normalTexture.index;
@@ -226,31 +217,13 @@ namespace vku {
 				int emissiveTexIdx = gMaterial.emissiveTexture.index;
 				int aoTexIdx = gMaterial.occlusionTexture.index;
 
-				for (VulkanDescriptorSet* set : materialInstance->descriptorSets) {
-					if (colorTexIdx > -1) {
-						VulkanTexture* colorTexture = textures[colorTexIdx];
-						set->write(0, colorTexture);
-					}
-					if (normalTexIdx > -1) {
-						VulkanTexture* normalTexture = textures[normalTexIdx];
-						set->write(1, normalTexture);
-					}
-					if (metallicTexIdx > -1) {
-						VulkanTexture* metallicTexture = textures[metallicTexIdx];
-						set->write(2, metallicTexture);
-					}
-					if (emissiveTexIdx > -1) {
-						VulkanTexture* emissiveTexture = textures[emissiveTexIdx];
-						set->write(3, emissiveTexture);
-					}
-					if (aoTexIdx > -1) {
-						VulkanTexture* aoTexture = textures[aoTexIdx];
-						set->write(4, aoTexture);
-					}
-					set->write(5, specular_ibl);
-					set->write(6, diffuse_ibl);
-					set->write(7, brdf_lut);
-				}
+				VulkanTexture* colorTexture = textures[colorTexIdx];
+				VulkanTexture* normalTexture = textures[normalTexIdx];
+				VulkanTexture* metallicTexture = textures[metallicTexIdx];
+				VulkanTexture* emissiveTexture = textures[emissiveTexIdx];
+				VulkanTexture* aoTexture = textures[aoTexIdx];
+
+				material = new PbrMaterial(colorTexture, normalTexture, metallicTexture, emissiveTexture, aoTexture, specular_ibl, diffuse_ibl, brdf_lut, scene, pass);
 			}
 		}
 
@@ -393,13 +366,13 @@ namespace vku {
 
 				for (Primitive& primitive : node.mesh.primitives) {
 					if (primitive.indexCount > 0) {
-						VulkanMaterialInstance* materialInstance = materialInstances[primitive.materialIndex];
+						VulkanMaterialInstance* materialInstance = materials[primitive.materialIndex]->matInstance;
 						if (!noMaterial) {
 							materialInstance->material->bind(commandBuffer);
 							materialInstance->bind(commandBuffer, i);
 						}
 
-						vkCmdPushConstants(commandBuffer, materialInstance->material->scene->globalPipelineLayout, VK_SHADER_STAGE_VERTEX_BIT|VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(glm::mat4), &nodeMatrix);
+						vkCmdPushConstants(commandBuffer, materialInstance->material->scene->globalPipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(glm::mat4), &nodeMatrix);
 						vkCmdDrawIndexed(commandBuffer, primitive.indexCount, 1, primitive.firstIndex, 0, 0);
 					}
 				}
@@ -419,11 +392,11 @@ namespace vku {
 		}
 
 		~VulkanGltfModel() {
-			
+
 			for (VulkanTexture* texture : textures) {
 				delete texture;
 			}
-			for (VulkanMaterial* material : materials) {
+			for (PbrMaterial* material : materials) {
 				delete material;
 			}
 			delete meshBuf;

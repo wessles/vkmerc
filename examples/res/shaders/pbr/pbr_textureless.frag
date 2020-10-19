@@ -13,14 +13,16 @@ layout(std140, binding = 0) uniform GlobalUniform {
 	float time;
 } global;
 
-layout(set=2, binding=0) uniform sampler2D tex_albedo;
-layout(set=2, binding=1) uniform sampler2D tex_normal;
-layout(set=2, binding=2) uniform sampler2D tex_metal_rough;
-layout(set=2, binding=3) uniform sampler2D tex_emissive;
-layout(set=2, binding=4) uniform sampler2D tex_ao;
-layout(set=2, binding=5) uniform samplerCube tex_spec_ibl;
-layout(set=2, binding=6) uniform samplerCube tex_diffuse_ibl;
-layout(set=2, binding=7) uniform sampler2D tex_brdf_lut;
+layout(set=2, binding=0, std140) uniform PbrUniform {
+	vec4 albedo;
+	vec4 emissive;
+	float metallic;
+	float roughness;
+} pbr;
+
+layout(set=2, binding=1) uniform samplerCube tex_spec_ibl;
+layout(set=2, binding=2) uniform samplerCube tex_diffuse_ibl;
+layout(set=2, binding=3) uniform sampler2D tex_brdf_lut;
 
 layout(location = 0) in vec3 inPosition;
 layout(location = 1) in vec3 inColor;
@@ -96,22 +98,18 @@ vec3 reflectance(vec3 c, vec3 p, vec3 n, vec3 wo, float m, float r, vec3 F0) {
 }
 
 vec3 getNormal() {
-	vec3 normal      = normalize(inNormal);
-	vec3 tangent     = normalize(inTangent.xyz);
-	vec3 bitangent   = cross(inNormal, inTangent.xyz) * inTangent.w;
-	mat3 TBN         = mat3(tangent, bitangent, normal);
-	vec3 localNormal = texture(tex_normal, inTexCoord).xyz * 2.0 - vec3(1.0);
-	return normalize(TBN * localNormal);
+	return normalize(inNormal);
 }
 
 void main()
 {
-	vec3 albedo = pow(texture(tex_albedo, inTexCoord).rgb, vec3(2.2));
-	vec2 m_r = texture(tex_metal_rough, inTexCoord).gb;
-	float roughness = m_r.x;
-	float metallic = m_r.y;
-	float ao = texture(tex_ao, inTexCoord).r;
-	vec3 emissive = pow(texture(tex_emissive, inTexCoord).rgb, vec3(2.2));
+	vec3 albedo = pbr.albedo.rgb;
+	vec3 emissive = pow(pbr.emissive.rgb, vec3(2.2));
+	float roughness = pbr.roughness;
+	float metallic = pbr.metallic;
+	
+	// no AO in textureless mode
+	//float ao = 1.0;
 
 	vec3 N = getNormal();
 	vec3 V = normalize(global.camPos.xyz - inPosition);
@@ -151,7 +149,7 @@ void main()
 		
 		vec3 diffuse = textureLod(tex_diffuse_ibl, N, roughness*MAX_REFLECTION_LOD).xyz * albedo;
 		
-		vec3 ambient = (kD * diffuse + spec) * ao;
+		vec3 ambient = (kD * diffuse + spec);
 		
 		outColor.rgb += ambient;
 	}

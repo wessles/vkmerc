@@ -130,7 +130,7 @@ namespace vku {
 		pushConstRanges.push_back(transformPushConst);
 	}
 
-	VulkanMaterial::VulkanMaterial(VulkanMaterialInfo * const matInfo, Scene* const scene, Pass* const pass) {
+	VulkanMaterial::VulkanMaterial(VulkanMaterialInfo* const matInfo, Scene* const scene, Pass* const pass) {
 		this->scene = scene;
 
 		std::vector<VkPipelineShaderStageCreateInfo> shaderStages;
@@ -158,12 +158,25 @@ namespace vku {
 				spirv_cross::CompilerGLSL glsl(std::move(spv));
 				spirv_cross::ShaderResources resources = glsl.get_shader_resources();
 
+				for (auto& resource : resources.uniform_buffers) {
+					unsigned set = glsl.get_decoration(resource.id, spv::DecorationDescriptorSet);
+					if (set == 2) {
+						unsigned binding = glsl.get_decoration(resource.id, spv::DecorationBinding);
+						if (reflDescriptors.size() <= binding) { reflDescriptors.resize(binding + 1); }
+						reflDescriptors[binding] = { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_ALL_GRAPHICS };
+					}
+				}
+
 				for (auto& resource : resources.sampled_images)
 				{
 					unsigned set = glsl.get_decoration(resource.id, spv::DecorationDescriptorSet);
-					unsigned binding = glsl.get_decoration(resource.id, spv::DecorationBinding);
-					if (set == 2)
-						reflDescriptors.push_back({ VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_ALL_GRAPHICS });
+					if (set == 2) {
+						unsigned binding = glsl.get_decoration(resource.id, spv::DecorationBinding);
+						const spirv_cross::SPIRType type = glsl.get_type(resource.base_type_id);
+
+						if (reflDescriptors.size() <= binding) { reflDescriptors.resize(binding + 1); }
+						reflDescriptors[binding] = { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_ALL_GRAPHICS };
+					}
 				}
 			}
 		}

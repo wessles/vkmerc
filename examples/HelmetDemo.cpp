@@ -37,7 +37,7 @@ class Engine : public BaseEngine {
 public:
 	Engine() {
 		this->windowTitle = "Helmet Demo";
-		//this->debugEnabled = false;
+		this->debugEnabled = false;
 		this->width = 900;
 		this->height = 900;
 	}

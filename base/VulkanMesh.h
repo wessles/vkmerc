@@ -3,6 +3,8 @@
 #include <vector>
 
 #include <glm/glm.hpp>
+#define GLM_ENABLE_EXPERIMENTAL
+#include <glm/gtx/hash.hpp>
 #include <mikktspace.h>
 #include <vulkan/vulkan.h>
 
@@ -95,5 +97,9 @@ namespace vku {
 }
 
 namespace std {
-	template<> struct hash<vku::Vertex>;
+	template<> struct hash<vku::Vertex> {
+		size_t operator()(vku::Vertex const& vertex) const {
+			return hash<glm::vec3>()(vertex.pos) ^ hash<glm::vec3>()(vertex.color) ^ hash<glm::vec2>()(vertex.texCoord) ^ hash<glm::vec3>()(vertex.normal) ^ hash<glm::vec3>()(vertex.tangent);
+		}
+	};
 }

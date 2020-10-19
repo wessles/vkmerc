@@ -1,5 +1,7 @@
-﻿#include <iostream>
+#include <iostream>
 #include <filesystem>
+
+#define VK_ENABLE_BETA_EXTENSIONS
 
 #include <VulkanContext.h>
 #include <VulkanDevice.h>
@@ -15,7 +17,6 @@
 #define TINYGLTF_IMPLEMENTATION
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include <pbr/VulkanGltfModel.hpp>
-#include <pbr/VulkanObjModel.h>
 #include <pbr/Ue4BrdfLut.hpp>
 #include <pbr/CubemapFiltering.hpp>
 
@@ -37,8 +38,8 @@ using namespace vku;
 class Engine : public BaseEngine {
 public:
 	Engine() {
-		this->windowTitle = "Cascaded Shadowmap Demo";
-		//this->debugEnabled = false;
+		this->windowTitle = "KHR_rt Demo";
+		this->debugEnabled = false;
 		this->width = 900;
 		this->height = 900;
 	}
@@ -50,7 +51,6 @@ public:
 	RenderGraph* graph;
 	Pass* main;
 
-	VulkanObjModel* platform;
 	VulkanGltfModel* gltf;
 	VulkanTexture* brdf;
 	VulkanTexture* irradiancemap;
@@ -99,7 +99,7 @@ public:
 				boxMeshBuf->draw(cb);
 
 				scene->render(cb, i, false);
-			});
+				});
 			main->samples = msaaCount;
 
 			AttachmentSchema* edge = graphSchema->attachment("color", main, {});
@@ -125,10 +125,6 @@ public:
 		gltf = new VulkanGltfModel("res/demo/DamagedHelmet.glb", scene, main, brdf, irradiancemap, specmap);
 		scene->addObject(gltf);
 
-		platform = new VulkanObjModel("res/demo/stand.obj", scene, main, specmap, irradiancemap, brdf);
-		platform->localTransform *= glm::translate(glm::vec3(0, -2, 0));
-		scene->addObject(platform);
-
 		// skyboxes don't care about depth testing / writing
 		VulkanMaterialInfo matInfo(context->device);
 		matInfo.depthStencil.depthWriteEnable = false;
@@ -141,6 +137,50 @@ public:
 		for (VulkanDescriptorSet* set : matInst->descriptorSets) { set->write(0, skybox); }
 
 		buildSwapchainDependants();
+
+		createAccelerationStructure();
+	}
+
+	void createAccelerationStructure(VulkanMeshBuffer* meshBuf) {
+
+		VkAccelerationStructureCreateGeometryTypeInfoKHR geomType{};
+		geomType.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_GEOMETRY_TYPE_INFO_KHR;
+		geomType.indexType = VK_INDEX_TYPE_UINT32;
+		geomType.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT;
+		geomType.geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR;
+		geomType.maxPrimitiveCount = 1000;
+		geomType.maxVertexCount = 1000;
+		geomType.allowsTransforms = VK_FALSE;
+
+		VkDeviceOrHostAddressConstKHR vertexAddress, indicesAddress;
+		VkBufferDeviceAddressInfo addrInfo{};
+		addrInfo.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
+		addrInfo.buffer = meshBuf->vBuffer;
+		vertexAddress.deviceAddress = vkGetBufferDeviceAddress(context->device->handle, &addrInfo);
+		addrInfo.buffer = meshBuf->iBuffer;
+		indicesAddress.deviceAddress = vkGetBufferDeviceAddress(context->device->handle, &addrInfo);
+
+		VkAccelerationStructureGeometryTrianglesDataKHR triangles;
+		triangles.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR;
+		triangles.vertexFormat = geomType.vertexFormat;
+		triangles.vertexData = vertexAddress;
+		triangles.vertexStride = sizeof(Vertex);
+		triangles.indexType = geomType.indexType;
+		triangles.indexData = indicesAddress;
+		triangles.transformData = {};
+
+		VkAccelerationStructureGeometryKHR asGeom{};
+		asGeom.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR
+		VkAccelerationStructureKHR accelStructure;
+
+		VkAccelerationStructureCreateInfoKHR accelCI{};
+		accelCI.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR;
+		accelCI.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
+
+		accelCI.pGeometryInfos = nullptr;
+
+
+		vkCreateAccelerationStructureKHR(context->device->handle, &accelCI, nullptr, &accelStructure);
 	}
 
 	glm::mat4 cascade = glm::mat4(1.0f);
@@ -153,7 +193,7 @@ public:
 		float time = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
 
 		float n = 0.01f;
-		float f = 20.0f;
+		float f = 5.0f;
 		float half = (n + f) / 2.0f;
 		float quarter = (n + half) / 2.0f;
 

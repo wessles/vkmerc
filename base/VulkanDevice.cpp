@@ -1,8 +1,11 @@
+#define VK_ENABLE_BETA_EXTENSIONS
+
 #include "VulkanDevice.h"
 
 #include <set>
 #include <optional>
 #include <stdexcept>
+#include <iostream>
 
 #include "VulkanContext.h"
 #include "VulkanSwapchain.h"
@@ -79,6 +82,15 @@ namespace vku {
 		// device props / features
 		vkGetPhysicalDeviceProperties(physicalDevice, &supportInfo.deviceProperties);
 		vkGetPhysicalDeviceFeatures(physicalDevice, &supportInfo.deviceFeatures);
+
+		// fetch KHR raytracing support
+		supportInfo.rtFeatures = VkPhysicalDeviceRayTracingFeaturesKHR{};
+		supportInfo.rtFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_FEATURES_KHR;
+		VkPhysicalDeviceFeatures2 features2{};
+		features2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+		features2.pNext = &supportInfo.rtFeatures;
+		vkGetPhysicalDeviceFeatures2(physicalDevice, &features2);
+
 
 		// get max MSAA sample count
 		{

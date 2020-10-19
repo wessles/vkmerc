@@ -9,13 +9,16 @@ namespace vku {
 	/* Functions for setting up the validation layer. */
 
 	static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity, VkDebugUtilsMessageTypeFlagsEXT messageType, const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData, void* pUserData) {
-		std::cerr << pCallbackData->pMessage << std::endl;
-		// let warnings pass without crashing
-		VulkanContext* context = static_cast<VulkanContext*>(pUserData);
-		if (context->haltOnValidationError) {
-			std::cerr << "Halting on validation error." << std::endl;
-			std::cin.get();
+		if (messageSeverity == VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT || messageSeverity == VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT) {
+			std::cerr << pCallbackData->pMessage << std::endl;
+			// let warnings pass without crashing
+			VulkanContext* context = static_cast<VulkanContext*>(pUserData);
+			if (context->haltOnValidationError) {
+				std::cerr << "Halting on validation error." << std::endl;
+				std::cin.get();
+			}
 		}
+		
 		return VK_TRUE;
 	}
 	bool checkValidationLayerSupport(const std::vector<const char*>& validationLayers) {
@@ -136,7 +139,7 @@ namespace vku {
 			appInfo.applicationVersion = VK_MAKE_VERSION(1, 0, 0);
 			appInfo.pEngineName = "vkmerc";
 			appInfo.engineVersion = VK_MAKE_VERSION(1, 0, 0);
-			appInfo.apiVersion = VK_API_VERSION_1_0;
+			appInfo.apiVersion = VK_API_VERSION_1_2;
 
 			// creation definition begins, pass app info
 			VkInstanceCreateInfo createInfo{};
