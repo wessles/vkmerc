@@ -26,7 +26,7 @@ _deps
 *.slo
 *.lo
 *.o
-*.obj
+# *.obj Because these are also 3D model files...
 
 # Precompiled Headers
 *.gch
