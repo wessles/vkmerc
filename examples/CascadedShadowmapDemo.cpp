@@ -1,4 +1,4 @@
-﻿#define SHADOWMAP_CASCADE_SIZE 256
+﻿#define SHADOWMAP_CASCADE_SIZE 1024
 
 #include <iostream>
 #include <filesystem>
@@ -35,6 +35,14 @@
 
 using namespace std;
 using namespace vku;
+
+// has to be static for glfw callback, unfortunately
+namespace csmdemostate {
+	static bool paused = false;
+	static bool showViewFrust = false;
+	static bool showCascFrust = false;
+	static int currentFrustum = -1;
+}
 
 class Engine : public BaseEngine {
 public:
@@ -135,6 +143,8 @@ public:
 				});
 
 			PassSchema* main = graphSchema->pass("main", [&](uint32_t i, const VkCommandBuffer& cb) {
+				using namespace csmdemostate;
+
 				if (currentFrustum != -1) {
 					cascadeMatInst->material->bind(cb);
 					cascadeMatInst->bind(cb, i);
@@ -152,12 +162,16 @@ public:
 					else
 						frust = global.cascade2;
 					frust = glm::inverse(frust);
-					vkCmdPushConstants(cb, visualizerMat->pipelineLayout, VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(glm::mat4), &testFrusta[currentFrustum]);
-					vkCmdPushConstants(cb, visualizerMat->pipelineLayout, VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_VERTEX_BIT, sizeof(glm::mat4), sizeof(glm::vec4), &red);
-					boxMeshBuf->draw(cb);
-					vkCmdPushConstants(cb, visualizerMat->pipelineLayout, VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(glm::mat4), &frust);
-					vkCmdPushConstants(cb, visualizerMat->pipelineLayout, VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_VERTEX_BIT, sizeof(glm::mat4), sizeof(glm::vec4), &blue);
-					boxMeshBuf->draw(cb);
+					if (showViewFrust) {
+						vkCmdPushConstants(cb, visualizerMat->pipelineLayout, VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(glm::mat4), &testFrusta[currentFrustum]);
+						vkCmdPushConstants(cb, visualizerMat->pipelineLayout, VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_VERTEX_BIT, sizeof(glm::mat4), sizeof(glm::vec4), &red);
+						boxMeshBuf->draw(cb);
+					}
+					if (showCascFrust) {
+						vkCmdPushConstants(cb, visualizerMat->pipelineLayout, VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(glm::mat4), &frust);
+						vkCmdPushConstants(cb, visualizerMat->pipelineLayout, VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_VERTEX_BIT, sizeof(glm::mat4), sizeof(glm::vec4), &blue);
+						boxMeshBuf->draw(cb);
+					}
 				}
 				else {
 					matInst->bind(cb, i);
@@ -186,6 +200,12 @@ public:
 			cascadeAtt->format = context->device->swapchain->depthFormat;
 			cascadeAtt->isSampled = true;
 			cascadeAtt->width = cascadeAtt->height = SHADOWMAP_CASCADE_SIZE * 2; // 2x2 grid of cascades. max 4.
+			VulkanSamplerInfo samplerCI{};
+			samplerCI.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+			samplerCI.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+			samplerCI.minFilter = VK_FILTER_NEAREST;
+			samplerCI.magFilter = VK_FILTER_NEAREST;
+			cascadeAtt->samplerInfo = samplerCI;
 
 			AttachmentSchema* depth = graphSchema->attachment("depth", main, {});
 			depth->format = context->device->swapchain->depthFormat;
@@ -209,15 +229,16 @@ public:
 		irradiancemap = generateIrradianceCube(context->device, skybox);
 		specmap = generatePrefilteredCube(context->device, skybox);
 
-		VulkanObjModel* city = new VulkanObjModel("res/models/city.obj", scene, mainPass, specmap, irradiancemap, brdf);
+		std::vector<ShaderMacro> pbrMacros = { { "AMBIENT_FACTOR", "0.01" } };
+		VulkanObjModel* city = new VulkanObjModel("res/models/city.obj", scene, mainPass, specmap, irradiancemap, brdf, pbrMacros);
 		city->localTransform *= glm::translate(glm::vec3(0, -2, 0));
 		scene->addObject(city);
 
-		platform = new VulkanObjModel("res/models/stand.obj", scene, mainPass, specmap, irradiancemap, brdf);
+		platform = new VulkanObjModel("res/models/stand.obj", scene, mainPass, specmap, irradiancemap, brdf, pbrMacros);
 		platform->localTransform *= glm::translate(glm::vec3(0, -2, 0));
 		scene->addObject(platform);
 
-		gltf = new VulkanGltfModel("res/models/DamagedHelmet.glb", scene, mainPass, brdf, irradiancemap, specmap);
+		gltf = new VulkanGltfModel("res/models/DamagedHelmet.glb", scene, mainPass, brdf, irradiancemap, specmap, pbrMacros);
 		scene->addObject(gltf);
 
 		// skyboxes don't care about depth testing / writing
@@ -268,16 +289,37 @@ public:
 		for (uint32_t i = 0; i < cmdBufs.size(); i++) {
 			cmdBufs[i] = context->device->createCommandBuffer();
 		}
+		
+		glfwSetKeyCallback(context->windowHandle, [](GLFWwindow* window, int key, int scancode, int action, int mode) {
+			using namespace csmdemostate;
+
+			if (action == GLFW_PRESS) {
+				switch (key) {
+				case GLFW_KEY_C:
+					paused = !paused;
+					break;
+				case GLFW_KEY_V:
+					currentFrustum++;
+					if (currentFrustum >= 3) currentFrustum = -1;
+					break;
+				case GLFW_KEY_B:
+					showViewFrust = !showViewFrust;
+					break;
+				case GLFW_KEY_N:
+					showCascFrust = !showCascFrust;
+					break;
+				}
+			}
+			});
 
 		buildSwapchainDependants();
+
+
 	}
 
 	SceneGlobalUniform global{};
 	glm::mat4 testFrustum, testCascadeFrustum;
-	bool paused = false, wasPressC = false;
-	bool wasPressV = false;
 	glm::mat4 testFrusta[3];
-	int currentFrustum = -1;
 
 	void updateUniforms(uint32_t i) {
 		flycam->update();
@@ -290,9 +332,9 @@ public:
 		VkExtent2D swapchainExtent = context->device->swapchain->swapChainExtent;
 		float width = static_cast<float>(swapchainExtent.width), height = static_cast<float>(swapchainExtent.height);
 		float n = .01f;
-		float f = 20.0f;
-		float half = 3.0f;
-		float quarter = 1.0f;
+		float f = 100.0f;
+		float half = 8.0f;
+		float quarter = 2.0f;
 
 		glm::mat4 transform = flycam->getTransform();
 		global.view = glm::inverse(transform);
@@ -301,35 +343,14 @@ public:
 		global.screenRes = { swapchainExtent.width, swapchainExtent.height };
 		global.time = time;
 
-		if (glfwGetKey(context->windowHandle, GLFW_KEY_C)) {
-			if (!wasPressC) {
-				paused = !paused;
-				wasPressC = true;
-			}
-		}
-		else {
-			wasPressC = false;
-		}
-
-		if (!paused) {
+		if (!csmdemostate::paused) {
 			global.directionalLight = glm::normalize(glm::rotate(glm::mat4(1.0), time, glm::vec3(0.0, 1.0, 0.0)) * glm::vec4(1.0, -1.0, 0.0, 0.0));
 			testFrusta[0] = transform * glm::inverse(flycam->getProjMatrix(width, height, n, quarter));
 			testFrusta[1] = transform * glm::inverse(flycam->getProjMatrix(width, height, quarter, half));
 			testFrusta[2] = transform * glm::inverse(flycam->getProjMatrix(width, height, half, f));
-			global.cascade0 = fitLightProjMatToCameraFrustum(testFrusta[0], global.directionalLight, SHADOWMAP_CASCADE_SIZE, 10);
-			global.cascade1 = fitLightProjMatToCameraFrustum(testFrusta[1], global.directionalLight, SHADOWMAP_CASCADE_SIZE, 35);
-			global.cascade2 = fitLightProjMatToCameraFrustum(testFrusta[2], global.directionalLight, SHADOWMAP_CASCADE_SIZE, 100);
-		}
-
-		if (glfwGetKey(context->windowHandle, GLFW_KEY_V)) {
-			if (!wasPressV) {
-				currentFrustum++;
-				if (currentFrustum >= 3) currentFrustum = -1;
-				wasPressV = true;
-			}
-		}
-		else {
-			wasPressV = false;
+			global.cascade0 = fitLightProjMatToCameraFrustum(testFrusta[0], global.directionalLight, SHADOWMAP_CASCADE_SIZE, 50);
+			global.cascade1 = fitLightProjMatToCameraFrustum(testFrusta[1], global.directionalLight, SHADOWMAP_CASCADE_SIZE, 50);
+			global.cascade2 = fitLightProjMatToCameraFrustum(testFrusta[2], global.directionalLight, SHADOWMAP_CASCADE_SIZE, 150);
 		}
 
 		scene->updateUniforms(i, &global);

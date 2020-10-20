@@ -23,7 +23,8 @@ namespace vku {
 			VulkanTexture* diffuse_ibl,
 			VulkanTexture* brdf_lut,
 			Scene* scene,
-			Pass* pass);
+			Pass* pass,
+			std::vector<ShaderMacro> macros = {});
 		~PbrMaterial();
 	};
 
@@ -45,7 +46,8 @@ namespace vku {
 			VulkanTexture* diffuse_ibl,
 			VulkanTexture* brdf_lut,
 			Scene* scene,
-			Pass* pass);
+			Pass* pass,
+			std::vector<ShaderMacro> macros = {});
 		~TexturelessPbrMaterial();
 	};
 }

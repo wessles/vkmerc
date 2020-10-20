@@ -13,6 +13,8 @@ layout(std140, binding = 0) uniform GlobalUniform {
 	float time;
 } global;
 
+layout(set=1, binding=0) uniform sampler2D cascade;
+
 layout(set=2, binding=0) uniform sampler2D tex_albedo;
 layout(set=2, binding=1) uniform sampler2D tex_normal;
 layout(set=2, binding=2) uniform sampler2D tex_metal_rough;
@@ -77,6 +79,36 @@ vec3 fresnelSchlickRoughness(float cosTheta, vec3 F0, float roughness)
     return F0 + (max(vec3(1.0 - roughness), F0) - F0) * pow(1.0 - cosTheta, 5.0);
 }
 
+// query the shadowmap cascades. 0 = shadow, 1 = lit
+float exposureToSun() {
+	vec4 cascadeProj4Vec = global.cascade0 * vec4(inPosition, 1.0);
+	vec2 cascadeProj = cascadeProj4Vec.xy;
+	if(cascadeProj.x > -1.0 && cascadeProj.y > -1.0 && cascadeProj.x < 1.0 && cascadeProj.y < 1.0) {
+		// cascade 0 is in quadrant 1 of cascade texture, from <0 0> to <0.5, 0.5>
+		cascadeProj = (cascadeProj+1.0) / 4.0; // -1,1 space -> 0,1 space -> quadrant 1
+	} else {
+		cascadeProj4Vec = global.cascade1 * vec4(inPosition, 1.0);
+		cascadeProj = cascadeProj4Vec.xy;
+		if(cascadeProj.x > -1.0 && cascadeProj.y > -1.0 && cascadeProj.x < 1.0 && cascadeProj.y < 1.0) {
+			// cascade 1 is in quadrant 1 of cascade texture, from <0 0.5> to <1.0, 0.5>
+			cascadeProj = (cascadeProj+1.0) / 4.0 + vec2(0.0, 0.5); // -1,1 space -> 0,1 space -> quadrant 2
+		} else {
+			cascadeProj4Vec = global.cascade2 * vec4(inPosition, 1.0);
+			cascadeProj = cascadeProj4Vec.xy;
+			if(cascadeProj.x > -1.0 && cascadeProj.y > -1.0 && cascadeProj.x < 1.0 && cascadeProj.y < 1.0) {
+				// cascade 2 is in quadrant 3 of cascade texture, from <0.5 0> to <1.0, 0.5>
+				cascadeProj = (cascadeProj+1.0) / 4.0 + vec2(0.5, 0.0); // -1,1 space -> 0,1 space -> quadrant 3
+			}
+		}
+	}
+
+	float mapZ = texture(cascade, cascadeProj.xy).r;
+	float myZ = cascadeProj4Vec.z;
+
+	if(mapZ + 0.01 < myZ) return 0.0;
+	return 1.0;
+}
+
 // cook-torrance BRDF
 vec3 brdf(vec3 c, vec3 n, vec3 wo, vec3 wi, float m, float r, vec3 F0) {
 	vec3 h = normalize(wo+wi);
@@ -88,7 +120,7 @@ vec3 brdf(vec3 c, vec3 n, vec3 wo, vec3 wi, float m, float r, vec3 F0) {
 	
 	vec3 Ks = 1.0 - F;
 
-	return (Ks * c / PI + D*F*G/(4*WoDotN * WiDotN)) * WiDotN;
+	return (Ks * c / PI + D*F*G/(4*WoDotN * WiDotN)) * WiDotN * exposureToSun();
 }
 
 vec3 reflectance(vec3 c, vec3 p, vec3 n, vec3 wo, float m, float r, vec3 F0) {
@@ -153,6 +185,10 @@ void main()
 		
 		vec3 ambient = (kD * diffuse + spec) * ao;
 		
+#ifdef AMBIENT_FACTOR
+		ambient *= AMBIENT_FACTOR;
+#endif
+
 		outColor.rgb += ambient;
 	}
 	

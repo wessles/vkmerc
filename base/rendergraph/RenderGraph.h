@@ -6,6 +6,7 @@
 
 #include <vulkan/vulkan.h>
 
+#include "../VulkanTexture.h"
 
 namespace vku {
 
@@ -54,6 +55,8 @@ namespace vku {
 
 		// by setting to a negative value, you are setting the dimension to equal floor(-swapchain.width / -1). You can do half resolution by setting width = -2
 		int width = -1, height = -1;
+
+		VulkanSamplerInfo samplerInfo{};
 
 		AttachmentSchema(const std::string name) {
 			this->name = name;

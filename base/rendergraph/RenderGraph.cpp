@@ -403,9 +403,7 @@ namespace vku {
 					VulkanImageViewInfo imageViewInfo{};
 					imageViewInfo.aspectFlags = aspect;
 
-					VulkanSamplerInfo samplerInfo{};
-					samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-					samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+					VulkanSamplerInfo samplerInfo = edge->schema->samplerInfo;
 
 					VulkanTextureInfo texInfo{};
 					texInfo.imageInfo = imageInfo;

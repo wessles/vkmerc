@@ -26,7 +26,7 @@ void main()
 	outColor.rgb = vec3(1.0);
 	outColor.a = 1.0;
 
-	outColor.rgb *= dot(-normalize(inNormal), vec3(global.directionalLight));
+	outColor.rgb *= 0.5+0.5*dot(-normalize(inNormal), vec3(global.directionalLight));
 	
 	vec4 cascadeProj4Vec = global.cascade0 * vec4(inPosition, 1.0);
 	vec2 cascadeProj = cascadeProj4Vec.xy;

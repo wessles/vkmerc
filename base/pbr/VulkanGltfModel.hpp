@@ -50,7 +50,7 @@ namespace vku {
 
 		VulkanGltfModel() {}
 
-		VulkanGltfModel(const std::string& filename, Scene* scene, Pass* pass, VulkanTexture* brdf_lut, VulkanTexture* diffuse_ibl, VulkanTexture* specular_ibl) {
+		VulkanGltfModel(const std::string& filename, Scene* scene, Pass* pass, VulkanTexture* brdf_lut, VulkanTexture* diffuse_ibl, VulkanTexture* specular_ibl, std::vector<ShaderMacro> macros = {}) {
 			tinygltf::Model model;
 
 			tinygltf::TinyGLTF loader;
@@ -72,7 +72,7 @@ namespace vku {
 				std::cout << "Loaded glTF: " << filename << std::endl;
 
 			loadTextures(scene->device, model);
-			loadMaterials(scene, pass, model, brdf_lut, diffuse_ibl, specular_ibl);
+			loadMaterials(scene, pass, model, brdf_lut, diffuse_ibl, specular_ibl, macros);
 
 			VulkanMeshData meshData;
 
@@ -204,7 +204,7 @@ namespace vku {
 			}
 		}
 
-		void loadMaterials(Scene* scene, Pass* pass, tinygltf::Model& model, VulkanTexture* brdf_lut, VulkanTexture* diffuse_ibl, VulkanTexture* specular_ibl) {
+		void loadMaterials(Scene* scene, Pass* pass, tinygltf::Model& model, VulkanTexture* brdf_lut, VulkanTexture* diffuse_ibl, VulkanTexture* specular_ibl, std::vector<ShaderMacro> macros) {
 			materials.resize(model.materials.size());
 
 			for (uint32_t i = 0; i < model.materials.size(); i++) {
@@ -223,7 +223,7 @@ namespace vku {
 				VulkanTexture* emissiveTexture = textures[emissiveTexIdx];
 				VulkanTexture* aoTexture = textures[aoTexIdx];
 
-				material = new PbrMaterial(colorTexture, normalTexture, metallicTexture, emissiveTexture, aoTexture, specular_ibl, diffuse_ibl, brdf_lut, scene, pass);
+				material = new PbrMaterial(colorTexture, normalTexture, metallicTexture, emissiveTexture, aoTexture, specular_ibl, diffuse_ibl, brdf_lut, scene, pass, macros);
 			}
 		}
 
