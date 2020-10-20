@@ -1,4 +1,4 @@
-﻿#include <iostream>
+#include <iostream>
 #include <filesystem>
 
 #include <VulkanContext.h>
@@ -15,6 +15,7 @@
 #define TINYGLTF_IMPLEMENTATION
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include <pbr/VulkanGltfModel.hpp>
+#include <pbr/VulkanObjModel.h>
 #include <pbr/Ue4BrdfLut.hpp>
 #include <pbr/CubemapFiltering.hpp>
 
@@ -36,7 +37,7 @@ using namespace vku;
 class Engine : public BaseEngine {
 public:
 	Engine() {
-		this->windowTitle = "Helmet Demo";
+		this->windowTitle = "Multisample Blit Demo";
 		this->width = 900;
 		this->height = 900;
 	}
@@ -47,7 +48,13 @@ public:
 	RenderGraphSchema* graphSchema;
 	RenderGraph* graph;
 	Pass* mainPass;
+	Pass* blitPass;
 
+	VulkanMeshBuffer* blitMeshBuf;
+	VulkanMaterial* blitMat;
+	VulkanMaterialInstance* blitMatInst;
+
+	VulkanObjModel* platform;
 	VulkanGltfModel* gltf;
 	VulkanTexture* brdf;
 	VulkanTexture* irradiancemap;
@@ -64,6 +71,7 @@ public:
 	void postInit()
 	{
 		boxMeshBuf = new VulkanMeshBuffer(context->device, vku::box);
+		blitMeshBuf = new VulkanMeshBuffer(context->device, vku::blit);
 
 		SceneInfo sInfo{};
 		scene = new Scene(context->device, sInfo);
@@ -90,37 +98,53 @@ public:
 		{
 			VkSampleCountFlagBits msaaCount = VK_SAMPLE_COUNT_8_BIT;
 
-			PassSchema *main = graphSchema->pass("main", [&](uint32_t i, const VkCommandBuffer& cb) {
+			PassSchema* main = graphSchema->pass("main", [&](uint32_t i, const VkCommandBuffer& cb) {
 				matInst->bind(cb, i);
 				matInst->material->bind(cb);
 				boxMeshBuf->draw(cb);
 
 				scene->render(cb, i, false);
-			});
+				});
+
+			PassSchema* blit = graphSchema->pass("blit", [&](uint32_t i, const VkCommandBuffer& cb) {
+				blitMatInst->bind(cb, i);
+				blitMatInst->material->bind(cb);
+				blitMeshBuf->draw(cb);
+				});
+
 			main->samples = msaaCount;
 
-			AttachmentSchema* edge = graphSchema->attachment("color", main, {});
+			AttachmentSchema* edge = graphSchema->attachment("color", main, { blit });
 			edge->format = context->device->swapchain->screenFormat;
+			edge->isSampled = true;
 			edge->samples = msaaCount;
-			edge->isSwapchain = true;
 			edge->resolve = true;
 
 			AttachmentSchema* depth = graphSchema->attachment("depth", main, {});
 			depth->format = context->device->swapchain->depthFormat;
 			depth->samples = msaaCount;
 			depth->isTransient = true;
+
+			AttachmentSchema* swap = graphSchema->attachment("swap", blit, {});
+			swap->format = context->device->swapchain->screenFormat;
+			swap->isSwapchain = true;
 		}
 
 		graph = new RenderGraph(graphSchema, scene, context->device->swapchain->swapChainLength);
 		graph->createLayouts();
 
 		mainPass = graph->getPass("main");
+		blitPass = graph->getPass("blit");
 
 		brdf = generateBRDFLUT(context->device);
 		irradiancemap = generateIrradianceCube(context->device, skybox);
 		specmap = generatePrefilteredCube(context->device, skybox);
 		gltf = new VulkanGltfModel("res/models/DamagedHelmet.glb", scene, mainPass, brdf, irradiancemap, specmap);
 		scene->addObject(gltf);
+
+		platform = new VulkanObjModel("res/models/stand.obj", scene, mainPass, specmap, irradiancemap, brdf);
+		platform->localTransform *= glm::translate(glm::vec3(0, -2, 0));
+		scene->addObject(platform);
 
 		// skyboxes don't care about depth testing / writing
 		VulkanMaterialInfo matInfo(context->device);
@@ -132,6 +156,12 @@ public:
 		mat = new VulkanMaterial(&matInfo, scene, mainPass);
 		matInst = new VulkanMaterialInstance(mat);
 		for (VulkanDescriptorSet* set : matInst->descriptorSets) { set->write(0, skybox); }
+
+		VulkanMaterialInfo blitMatInfo(context->device);
+		blitMatInfo.shaderStages.push_back({ "res/shaders/blit/blit.frag", VK_SHADER_STAGE_FRAGMENT_BIT, {} });
+		blitMatInfo.shaderStages.push_back({ "res/shaders/blit/blit.vert", VK_SHADER_STAGE_VERTEX_BIT, {} });
+		blitMat = new VulkanMaterial(&blitMatInfo, scene, blitPass);
+		blitMatInst = new VulkanMaterialInstance(blitMat);
 
 		buildSwapchainDependants();
 	}
@@ -146,7 +176,7 @@ public:
 		float time = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
 
 		float n = 0.01f;
-		float f = 5.0f;
+		float f = 20.0f;
 		float half = (n + f) / 2.0f;
 		float quarter = (n + half) / 2.0f;
 
@@ -193,6 +223,10 @@ public:
 		delete boxMeshBuf;
 		delete matInst;
 		delete mat;
+
+		delete blitMeshBuf;
+		delete blitMatInst;
+		delete blitMat;
 
 		delete flycam;
 

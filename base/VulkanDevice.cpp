@@ -221,6 +221,7 @@ namespace vku {
 		{
 			VkCommandPoolCreateInfo commandPoolCI{};
 			commandPoolCI.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+			commandPoolCI.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
 			commandPoolCI.queueFamilyIndex = supportInfo.graphicsFamily.value();
 			vkCreateCommandPool(this->handle, &commandPoolCI, nullptr, &this->commandPool);
 		}

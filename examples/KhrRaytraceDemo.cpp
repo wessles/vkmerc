@@ -49,7 +49,7 @@ public:
 
 	RenderGraphSchema* graphSchema;
 	RenderGraph* graph;
-	Pass* main;
+	Pass* mainPass;
 
 	VulkanGltfModel* gltf;
 	VulkanTexture* brdf;
@@ -117,12 +117,12 @@ public:
 		graph = new RenderGraph(graphSchema, scene, context->device->swapchain->swapChainLength);
 		graph->createLayouts();
 
-		main = graph->getPass("main");
+		mainPass = graph->getPass("main");
 
 		brdf = generateBRDFLUT(context->device);
 		irradiancemap = generateIrradianceCube(context->device, skybox);
 		specmap = generatePrefilteredCube(context->device, skybox);
-		gltf = new VulkanGltfModel("res/demo/DamagedHelmet.glb", scene, main, brdf, irradiancemap, specmap);
+		gltf = new VulkanGltfModel("res/models/DamagedHelmet.glb", scene, mainPass, brdf, irradiancemap, specmap);
 		scene->addObject(gltf);
 
 		// skyboxes don't care about depth testing / writing
@@ -132,7 +132,7 @@ public:
 		matInfo.rasterizer.frontFace = VK_FRONT_FACE_CLOCKWISE;
 		matInfo.shaderStages.push_back({ "res/shaders/skybox/skybox.frag", VK_SHADER_STAGE_FRAGMENT_BIT, {} });
 		matInfo.shaderStages.push_back({ "res/shaders/skybox/skybox.vert", VK_SHADER_STAGE_VERTEX_BIT, {} });
-		mat = new VulkanMaterial(&matInfo, scene, main);
+		mat = new VulkanMaterial(&matInfo, scene, mainPass);
 		matInst = new VulkanMaterialInstance(mat);
 		for (VulkanDescriptorSet* set : matInst->descriptorSets) { set->write(0, skybox); }
 

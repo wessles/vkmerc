@@ -129,20 +129,21 @@ namespace vku {
 					attachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
 					attachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
 					if (isDepth) {
-						attachment.initialLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+						attachment.initialLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 						attachment.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
 					}
 					else {
-						attachment.initialLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+						attachment.initialLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 						attachment.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 					}
+
 
 					attachments.push_back(attachment);
 					inputRefs.push_back({ i++, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL });
 				}
 
 				// -1 = not found
-				int swapchainAttachmentToResolve = -1;
+				int attachmentIndexToResolve = -1;
 				AttachmentSchema* swapchainAttachmentSchema = nullptr;
 
 				for (AttachmentSchema* edge : schema.out) {
@@ -168,14 +169,16 @@ namespace vku {
 						throw std::runtime_error("Cannot present a depth layout image!");
 					}
 
-					if (edge->isSwapchain) {
-						if (edge->resolve) {
-							swapchainAttachmentToResolve = i;
-							swapchainAttachmentSchema = edge;
-						}
-						else {
-							attachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-						}
+					if (edge->resolve) {
+						attachmentIndexToResolve = i;
+						swapchainAttachmentSchema = edge;
+					}
+					else if (edge->isSwapchain) {
+						attachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+					}
+
+					if (edge->isSampled) {
+						attachment.finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 					}
 
 					if (isDepth) {
@@ -195,8 +198,7 @@ namespace vku {
 				VkAttachmentReference resolveRef;
 				VkAttachmentReference* resolveRefPtr = nullptr;
 
-				if (swapchainAttachmentToResolve != -1) {
-
+				if (attachmentIndexToResolve != -1) {
 					VkAttachmentDescription colorAttachmentResolve{};
 					colorAttachmentResolve.format = swapchainAttachmentSchema->format;
 					colorAttachmentResolve.samples = VK_SAMPLE_COUNT_1_BIT;
@@ -205,7 +207,19 @@ namespace vku {
 					colorAttachmentResolve.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
 					colorAttachmentResolve.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
 					colorAttachmentResolve.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-					colorAttachmentResolve.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+
+					if (swapchainAttachmentSchema->isSwapchain) {
+						colorAttachmentResolve.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+					}
+					else if (swapchainAttachmentSchema->isSampled) {
+						colorAttachmentResolve.finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+					}
+					else if (swapchainAttachmentSchema->format != device->swapchain->depthFormat) {
+						colorAttachmentResolve.finalLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
+					}
+					else {
+						colorAttachmentResolve.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+					}
 
 					attachments.push_back(colorAttachmentResolve);
 					resolveRef = { i++, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL };
@@ -292,18 +306,17 @@ namespace vku {
 					passNode->inputLayout->handle
 				};
 
-				// transformation matrix push constant
-				VkPushConstantRange transformPushConst;
-				transformPushConst.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_VERTEX_BIT;
-				transformPushConst.offset = 0;
-				transformPushConst.size = sizeof(glm::mat4);
+				VkPushConstantRange maxPushConst;
+				maxPushConst.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_VERTEX_BIT;
+				maxPushConst.offset = 0;
+				maxPushConst.size = 128;
 
 				VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
 				pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
 				pipelineLayoutInfo.setLayoutCount = static_cast<uint32_t>(layouts.size());
 				pipelineLayoutInfo.pSetLayouts = layouts.data();
 				pipelineLayoutInfo.pushConstantRangeCount = 1;
-				pipelineLayoutInfo.pPushConstantRanges = &transformPushConst;
+				pipelineLayoutInfo.pPushConstantRanges = &maxPushConst;
 
 				VkResult result = vkCreatePipelineLayout(*device, &pipelineLayoutInfo, nullptr, &passNode->pipelineLayout);
 				if (result != VK_SUCCESS) {
@@ -326,6 +339,9 @@ namespace vku {
 		}
 		for (uint32_t i = 0; i < edges.size(); i++) {
 			edges[i]->instances.resize(numInstances);
+			if (edges[i]->schema->resolve) {
+				edges[i]->resolveInstances.resize(numInstances);
+			}
 		}
 
 		// we need to process multiple instances for each element of the graph
@@ -398,6 +414,13 @@ namespace vku {
 
 					edge->instances[i].texture = new VulkanTexture(device, texInfo);
 
+					// if we need to resolve multisampling (and we don't have a spare swapchain image lying around), we need a corresponding attachment
+					if (schema->resolve && !schema->isSwapchain) {
+						imageInfo.numSamples = VK_SAMPLE_COUNT_1_BIT;
+						texInfo.imageInfo = imageInfo;
+						edge->resolveInstances[i] = { new VulkanTexture(device, texInfo) };
+					}
+
 					if (isDepth) {
 						edge->instances[i].texture->image->transitionImageLayout(VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
 					}
@@ -425,24 +448,34 @@ namespace vku {
 						}
 
 						bool resolveAttachmentAtEnd = false;
+						VulkanImageView* resolveAttachmentImageView = nullptr;
 
 						for (auto& edge : current.out) {
 							const AttachmentSchema* schema = edge->schema;
+
 							if (schema->isSwapchain) {
 								if (schema->resolve) {
 									attachmentImageViews.push_back(*edge->instances[i].texture->view);
+
 									resolveAttachmentAtEnd = true;
-								} else {
+									resolveAttachmentImageView = device->swapchain->swapChainImageViews[i];
+								}
+								else {
 									attachmentImageViews.push_back(*device->swapchain->swapChainImageViews[i]);
 								}
 							}
 							else {
 								attachmentImageViews.push_back(*edge->instances[i].texture->view);
+
+								if (schema->resolve) {
+									resolveAttachmentAtEnd = true;
+									resolveAttachmentImageView = edge->resolveInstances[i].texture->view;
+								}
 							}
 						}
 
 						if (resolveAttachmentAtEnd) {
-							attachmentImageViews.push_back(*device->swapchain->swapChainImageViews[i]);
+							attachmentImageViews.push_back(*resolveAttachmentImageView);
 						}
 
 						// 1. all nodes have at least one outgoing attachment
@@ -483,7 +516,12 @@ namespace vku {
 						throw std::runtime_error("Binding index for an edge could not be found in target node.");
 					}
 
-					node->instances[i].descriptorSet->write(bindingIndex, edge->instances[i].texture);
+					if (!edge->schema->resolve) {
+						node->instances[i].descriptorSet->write(bindingIndex, edge->instances[i].texture);
+					}
+					else {
+						node->instances[i].descriptorSet->write(bindingIndex, edge->resolveInstances[i].texture);
+					}
 				}
 			}
 		}
@@ -499,6 +537,8 @@ namespace vku {
 		for (Attachment* edge : edges) {
 			for (int i = 0; i < numInstances; i++) {
 				delete edge->instances[i].texture;
+				if (edge->schema->resolve)
+					delete edge->resolveInstances[i].texture;
 			}
 		}
 	}

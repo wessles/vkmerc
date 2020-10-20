@@ -6,7 +6,7 @@
 #include <glm/gtx/transform.hpp>
 
 namespace vku {
-	glm::mat4 fitLightProjMatToCameraFrustum(glm::mat4 frustumMat, glm::vec4 lightDirection, float dim) {
+	glm::mat4 fitLightProjMatToCameraFrustum(glm::mat4 frustumMat, glm::vec4 lightDirection, float dim, float size) {
 		// multiply by inverse projection*view matrix to find frustum vertices in world space
 		// transform to light space
 		// same pass, find minimum along each axis
@@ -20,18 +20,17 @@ namespace vku {
 		// start with <-1 -1 0> to <1 1 1> cube
 		// notice we use z:[0, 1] clip space, unlike openGL's z:[-1, 1]
 		std::vector<glm::vec4> boundingVertices = {
-			{-1.0f,	-1.0f,	-1.0f,	1.0f},
+			{-1.0f,	-1.0f,	0.0f,	1.0f},
 			{-1.0f,	-1.0f,	1.0f,	1.0f},
-			{-1.0f,	1.0f,	-1.0f,	1.0f},
+			{-1.0f,	1.0f,	0.0f,	1.0f},
 			{-1.0f,	1.0f,	1.0f,	1.0f},
-			{1.0f,	-1.0f,	-1.0f,	1.0f},
+			{1.0f,	-1.0f,	0.0f,	1.0f},
 			{1.0f,	-1.0f,	1.0f,	1.0f},
-			{1.0f,	1.0f,	-1.0f,	1.0f},
+			{1.0f,	1.0f,	0.0f,	1.0f},
 			{1.0f,	1.0f,	1.0f,	1.0f}
 		};
 		for (glm::vec4& vert : boundingVertices) {
 			// clip space -> world space
-			vert.z = (vert.z + 1.0f) / 2.0f;
 			vert = frustumMat * vert;
 			vert /= vert.w;
 		}
@@ -57,10 +56,6 @@ namespace vku {
 			boundingB.z = std::max(vert.z, boundingB.z);
 		}
 
-		// scene bounding box constraint (simplified, expand on with proper scene graph later)
-		boundingA.y = std::min(-0.1f, boundingA.y);
-		boundingB.y = std::max(1.0f, boundingB.y);
-
 		// from https://en.wikipedia.org/wiki/Orthographic_projection#Geometry
 		// because I don't trust GLM
 		float l = boundingA.x;
@@ -70,20 +65,18 @@ namespace vku {
 		float n = boundingA.z;
 		float f = boundingB.z;
 
-		//REMOVE THIS
-		n = -10;
-		f = 10;
+		// TODO: accomodate scene geometry bounding box hierarchy
+		n = -size/2.0f;
+		f = -n;
 
 		// keep constant world-size square, side length = diagonal of largest face of frustum
 		float constantSize = glm::length(glm::vec3(boundingVertices[7]) - glm::vec3(boundingVertices[0])) * 2.0;
 
 		// make it square, with side length of max(r-l,t-b)
-
 		float W = r - l, H = t - b;
 		float diff = constantSize - H;
 		t += diff / 2.0f;
 		b -= diff / 2.0f;
-
 		diff = constantSize - W;
 		r += diff / 2.0f;
 		l -= diff / 2.0f;

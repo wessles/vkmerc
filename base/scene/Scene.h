@@ -5,10 +5,11 @@
 #include <vulkan/vulkan.h>
 #include <glm/glm.hpp>
 
+#include "../VulkanDevice.h"
+
 namespace vku {
 	struct Object;
 
-	struct VulkanDevice;
 	struct DescriptorLayout;
 	struct VulkanDescriptorSetLayout;
 	struct VulkanDescriptorSet;

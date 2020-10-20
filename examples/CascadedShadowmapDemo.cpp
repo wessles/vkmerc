@@ -1,4 +1,6 @@
-﻿#include <iostream>
+﻿#define SHADOWMAP_CASCADE_SIZE 256
+
+#include <iostream>
 #include <filesystem>
 
 #include <VulkanContext.h>
@@ -23,7 +25,7 @@
 #include <scene/Scene.h>
 #include <BaseEngine.h>
 
-#include <util/OrbitCam.h>
+#include <util/FlyCam.h>
 
 #define GLM_FORCE_RADIANS
 #define GLM_FORCE_DEPTH_ZERO_TO_ONE
@@ -38,23 +40,36 @@ class Engine : public BaseEngine {
 public:
 	Engine() {
 		this->windowTitle = "Cascaded Shadowmap Demo";
-		//this->debugEnabled = false;
 		this->width = 900;
 		this->height = 900;
 	}
 
-	OrbitCam* flycam;
+	FlyCam* flycam;
 	Scene* scene;
 
 	RenderGraphSchema* graphSchema;
 	RenderGraph* graph;
-	Pass* main;
+	Pass* shadowmapPass;
+	Pass* mainPass;
+	Pass* blitPass;
+
+	VulkanMaterial* shadowpassMat;
+	VulkanMaterialInstance* shadowpassMatInst;
+
+	VulkanMeshBuffer* blitMeshBuf;
+	VulkanMaterial* blitMat;
+	VulkanMaterialInstance* blitMatInst;
 
 	VulkanObjModel* platform;
 	VulkanGltfModel* gltf;
 	VulkanTexture* brdf;
 	VulkanTexture* irradiancemap;
 	VulkanTexture* specmap;
+
+	VulkanMaterial* cascadeMat;
+	VulkanMaterialInstance* cascadeMatInst;
+	VulkanMaterial* visualizerMat;
+	VulkanMaterialInstance* visualizerMatInstance;
 
 	VulkanTexture* skybox;
 	VulkanMeshBuffer* boxMeshBuf;
@@ -67,6 +82,7 @@ public:
 	void postInit()
 	{
 		boxMeshBuf = new VulkanMeshBuffer(context->device, vku::box);
+		blitMeshBuf = new VulkanMeshBuffer(context->device, vku::blit);
 
 		SceneInfo sInfo{};
 		scene = new Scene(context->device, sInfo);
@@ -87,47 +103,122 @@ public:
 		skybox->view = new VulkanImageView(context->device, viewInfo);
 		skybox->sampler = new VulkanSampler(context->device, {});
 
-		flycam = new OrbitCam(context->windowHandle);
+		flycam = new FlyCam(context->windowHandle);
 
 		graphSchema = new RenderGraphSchema();
 		{
 			VkSampleCountFlagBits msaaCount = VK_SAMPLE_COUNT_8_BIT;
 
-			PassSchema* main = graphSchema->pass("main", [&](uint32_t i, const VkCommandBuffer& cb) {
-				matInst->bind(cb, i);
-				matInst->material->bind(cb);
-				boxMeshBuf->draw(cb);
+			PassSchema* cascade0 = graphSchema->pass("shadowpass", [&](uint32_t i, const VkCommandBuffer& cb) {
+				shadowpassMatInst->bind(cb, i);
+				shadowpassMatInst->material->bind(cb);
 
-				scene->render(cb, i, false);
-			});
+				glm::uint cascadeIndex = 0;
+
+				VkViewport viewport{};
+				viewport.minDepth = 0.0;
+				viewport.maxDepth = 1.0;
+				viewport.width = viewport.height = SHADOWMAP_CASCADE_SIZE;
+				for (int x = 0; x <= 1; x++) {
+					viewport.x = x * SHADOWMAP_CASCADE_SIZE;
+					for (int y = 0; y <= 1; y++) {
+						if (cascadeIndex <= 2) {
+							viewport.y = y * SHADOWMAP_CASCADE_SIZE;
+							vkCmdSetViewport(cb, 0, 1, &viewport);
+
+							vkCmdPushConstants(cb, mat->pipelineLayout, VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_VERTEX_BIT, sizeof(glm::mat4), sizeof(glm::uint), &cascadeIndex);
+							scene->render(cb, i, true);
+							cascadeIndex++;
+						}
+					}
+				}
+				});
+
+			PassSchema* main = graphSchema->pass("main", [&](uint32_t i, const VkCommandBuffer& cb) {
+				if (currentFrustum != -1) {
+					cascadeMatInst->material->bind(cb);
+					cascadeMatInst->bind(cb, i);
+
+					scene->render(cb, i, true);
+
+					visualizerMat->bind(cb);
+					visualizerMatInstance->bind(cb, i);
+					const glm::vec4 red(1.0, 0.0, 0.0, 0.5), blue(0.0, 1.0, 0.0, 0.3);
+					glm::mat4 frust;
+					if (currentFrustum == 0)
+						frust = global.cascade0;
+					else if (currentFrustum == 1)
+						frust = global.cascade1;
+					else
+						frust = global.cascade2;
+					frust = glm::inverse(frust);
+					vkCmdPushConstants(cb, visualizerMat->pipelineLayout, VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(glm::mat4), &testFrusta[currentFrustum]);
+					vkCmdPushConstants(cb, visualizerMat->pipelineLayout, VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_VERTEX_BIT, sizeof(glm::mat4), sizeof(glm::vec4), &red);
+					boxMeshBuf->draw(cb);
+					vkCmdPushConstants(cb, visualizerMat->pipelineLayout, VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(glm::mat4), &frust);
+					vkCmdPushConstants(cb, visualizerMat->pipelineLayout, VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_VERTEX_BIT, sizeof(glm::mat4), sizeof(glm::vec4), &blue);
+					boxMeshBuf->draw(cb);
+				}
+				else {
+					matInst->bind(cb, i);
+					matInst->material->bind(cb);
+					boxMeshBuf->draw(cb);
+
+					scene->render(cb, i, false);
+				}
+				});
+
+			PassSchema* blit = graphSchema->pass("blit", [&](uint32_t i, const VkCommandBuffer& cb) {
+				blitMatInst->bind(cb, i);
+				blitMatInst->material->bind(cb);
+				blitMeshBuf->draw(cb);
+				});
+
 			main->samples = msaaCount;
 
-			AttachmentSchema* edge = graphSchema->attachment("color", main, {});
+			AttachmentSchema* edge = graphSchema->attachment("color", main, { blit });
 			edge->format = context->device->swapchain->screenFormat;
+			edge->isSampled = true;
 			edge->samples = msaaCount;
-			edge->isSwapchain = true;
 			edge->resolve = true;
+
+			AttachmentSchema* cascadeAtt = graphSchema->attachment("cascades", cascade0, { main, blit });
+			cascadeAtt->format = context->device->swapchain->depthFormat;
+			cascadeAtt->isSampled = true;
+			cascadeAtt->width = cascadeAtt->height = SHADOWMAP_CASCADE_SIZE * 2; // 2x2 grid of cascades. max 4.
 
 			AttachmentSchema* depth = graphSchema->attachment("depth", main, {});
 			depth->format = context->device->swapchain->depthFormat;
 			depth->samples = msaaCount;
 			depth->isTransient = true;
+
+			AttachmentSchema* swap = graphSchema->attachment("swap", blit, {});
+			swap->format = context->device->swapchain->screenFormat;
+			swap->isSwapchain = true;
 		}
 
 		graph = new RenderGraph(graphSchema, scene, context->device->swapchain->swapChainLength);
 		graph->createLayouts();
 
-		main = graph->getPass("main");
+		shadowmapPass = graph->getPass("shadowpass");
+		mainPass = graph->getPass("main");
+		blitPass = graph->getPass("blit");
 
+		// generate PBR stuff
 		brdf = generateBRDFLUT(context->device);
 		irradiancemap = generateIrradianceCube(context->device, skybox);
 		specmap = generatePrefilteredCube(context->device, skybox);
-		gltf = new VulkanGltfModel("res/demo/DamagedHelmet.glb", scene, main, brdf, irradiancemap, specmap);
-		scene->addObject(gltf);
 
-		platform = new VulkanObjModel("res/demo/stand.obj", scene, main, specmap, irradiancemap, brdf);
+		VulkanObjModel* city = new VulkanObjModel("res/models/city.obj", scene, mainPass, specmap, irradiancemap, brdf);
+		city->localTransform *= glm::translate(glm::vec3(0, -2, 0));
+		scene->addObject(city);
+
+		platform = new VulkanObjModel("res/models/stand.obj", scene, mainPass, specmap, irradiancemap, brdf);
 		platform->localTransform *= glm::translate(glm::vec3(0, -2, 0));
 		scene->addObject(platform);
+
+		gltf = new VulkanGltfModel("res/models/DamagedHelmet.glb", scene, mainPass, brdf, irradiancemap, specmap);
+		scene->addObject(gltf);
 
 		// skyboxes don't care about depth testing / writing
 		VulkanMaterialInfo matInfo(context->device);
@@ -136,14 +227,57 @@ public:
 		matInfo.rasterizer.frontFace = VK_FRONT_FACE_CLOCKWISE;
 		matInfo.shaderStages.push_back({ "res/shaders/skybox/skybox.frag", VK_SHADER_STAGE_FRAGMENT_BIT, {} });
 		matInfo.shaderStages.push_back({ "res/shaders/skybox/skybox.vert", VK_SHADER_STAGE_VERTEX_BIT, {} });
-		mat = new VulkanMaterial(&matInfo, scene, main);
+		mat = new VulkanMaterial(&matInfo, scene, mainPass);
 		matInst = new VulkanMaterialInstance(mat);
 		for (VulkanDescriptorSet* set : matInst->descriptorSets) { set->write(0, skybox); }
+
+		// blit pass
+		VulkanMaterialInfo blitMatInfo(context->device);
+		blitMatInfo.shaderStages.push_back({ "res/shaders/misc/shadowpass_debug_blit.frag", VK_SHADER_STAGE_FRAGMENT_BIT, {} });
+		blitMatInfo.shaderStages.push_back({ "res/shaders/blit/blit.vert", VK_SHADER_STAGE_VERTEX_BIT, {} });
+		blitMat = new VulkanMaterial(&blitMatInfo, scene, blitPass);
+		blitMatInst = new VulkanMaterialInstance(blitMat);
+
+		// shadowpass material
+		VulkanMaterialInfo shadowMatInfo(context->device);
+		shadowMatInfo.depthStencil.depthTestEnable = true;
+		shadowMatInfo.shaderStages.push_back({ "res/shaders/shadowpass/shadowpass.vert", VK_SHADER_STAGE_VERTEX_BIT, {} });
+		shadowpassMat = new VulkanMaterial(&shadowMatInfo, scene, shadowmapPass);
+		shadowpassMatInst = new VulkanMaterialInstance(shadowpassMat);
+
+		// debug frustum visualizer
+		VulkanMaterialInfo visualizerMatInfo(context->device);
+		visualizerMatInfo.rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+		visualizerMatInfo.colorBlendAttachment.blendEnable = true;
+		visualizerMatInfo.colorBlendAttachment.alphaBlendOp = VK_BLEND_OP_ADD;
+		visualizerMatInfo.colorBlendAttachment.colorBlendOp = VK_BLEND_OP_ADD;
+		visualizerMatInfo.rasterizer.cullMode = VK_CULL_MODE_NONE;
+		visualizerMatInfo.shaderStages.push_back({ "res/shaders/misc/frustum_debugger.frag", VK_SHADER_STAGE_FRAGMENT_BIT, {} });
+		visualizerMatInfo.shaderStages.push_back({ "res/shaders/misc/frustum_debugger.vert", VK_SHADER_STAGE_VERTEX_BIT, {} });
+		visualizerMat = new VulkanMaterial(&visualizerMatInfo, scene, mainPass);
+		visualizerMatInstance = new VulkanMaterialInstance(visualizerMat);
+
+		// visualize where cascades start and end
+		VulkanMaterialInfo cascadeDebugMatInfo(context->device);
+		cascadeDebugMatInfo.shaderStages.push_back({ "res/shaders/misc/cascade_debugger.frag", VK_SHADER_STAGE_FRAGMENT_BIT, {} });
+		cascadeDebugMatInfo.shaderStages.push_back({ "res/shaders/pbr/pbr.vert", VK_SHADER_STAGE_VERTEX_BIT, {} });
+		cascadeMat = new VulkanMaterial(&cascadeDebugMatInfo, scene, mainPass);
+		cascadeMatInst = new VulkanMaterialInstance(cascadeMat);
+
+		cmdBufs.resize(context->device->swapchain->swapChainLength);
+		for (uint32_t i = 0; i < cmdBufs.size(); i++) {
+			cmdBufs[i] = context->device->createCommandBuffer();
+		}
 
 		buildSwapchainDependants();
 	}
 
-	glm::mat4 cascade = glm::mat4(1.0f);
+	SceneGlobalUniform global{};
+	glm::mat4 testFrustum, testCascadeFrustum;
+	bool paused = false, wasPressC = false;
+	bool wasPressV = false;
+	glm::mat4 testFrusta[3];
+	int currentFrustum = -1;
 
 	void updateUniforms(uint32_t i) {
 		flycam->update();
@@ -152,41 +286,73 @@ public:
 		auto currentTime = std::chrono::high_resolution_clock::now();
 		float time = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
 
-		float n = 0.01f;
+		// camera numbers
+		VkExtent2D swapchainExtent = context->device->swapchain->swapChainExtent;
+		float width = static_cast<float>(swapchainExtent.width), height = static_cast<float>(swapchainExtent.height);
+		float n = .01f;
 		float f = 20.0f;
-		float half = (n + f) / 2.0f;
-		float quarter = (n + half) / 2.0f;
+		float half = 3.0f;
+		float quarter = 1.0f;
 
-		SceneGlobalUniform global{};
 		glm::mat4 transform = flycam->getTransform();
 		global.view = glm::inverse(transform);
-		VkExtent2D swapchainExtent = context->device->swapchain->swapChainExtent;
-		global.proj = flycam->getProjMatrix(static_cast<float>(swapchainExtent.width), static_cast<float>(swapchainExtent.height), n, f);
+		global.proj = flycam->getProjMatrix(width, height, 0.05f, 500.0);
 		global.camPos = transform * glm::vec4(0.0, 0.0, 0.0, 1.0);
 		global.screenRes = { swapchainExtent.width, swapchainExtent.height };
 		global.time = time;
-		global.directionalLight = glm::rotate(glm::mat4(1.0), time, glm::vec3(0.0, 1.0, 0.0)) * glm::vec4(1.0, -1.0, 0.0, 0.0);
+
+		if (glfwGetKey(context->windowHandle, GLFW_KEY_C)) {
+			if (!wasPressC) {
+				paused = !paused;
+				wasPressC = true;
+			}
+		}
+		else {
+			wasPressC = false;
+		}
+
+		if (!paused) {
+			global.directionalLight = glm::normalize(glm::rotate(glm::mat4(1.0), time, glm::vec3(0.0, 1.0, 0.0)) * glm::vec4(1.0, -1.0, 0.0, 0.0));
+			testFrusta[0] = transform * glm::inverse(flycam->getProjMatrix(width, height, n, quarter));
+			testFrusta[1] = transform * glm::inverse(flycam->getProjMatrix(width, height, quarter, half));
+			testFrusta[2] = transform * glm::inverse(flycam->getProjMatrix(width, height, half, f));
+			global.cascade0 = fitLightProjMatToCameraFrustum(testFrusta[0], global.directionalLight, SHADOWMAP_CASCADE_SIZE, 10);
+			global.cascade1 = fitLightProjMatToCameraFrustum(testFrusta[1], global.directionalLight, SHADOWMAP_CASCADE_SIZE, 35);
+			global.cascade2 = fitLightProjMatToCameraFrustum(testFrusta[2], global.directionalLight, SHADOWMAP_CASCADE_SIZE, 100);
+		}
+
+		if (glfwGetKey(context->windowHandle, GLFW_KEY_V)) {
+			if (!wasPressV) {
+				currentFrustum++;
+				if (currentFrustum >= 3) currentFrustum = -1;
+				wasPressV = true;
+			}
+		}
+		else {
+			wasPressV = false;
+		}
 
 		scene->updateUniforms(i, &global);
 	}
 
+	int timesDrawn = 0;
 	VkCommandBuffer draw(uint32_t i)
 	{
 		updateUniforms(i);
+
+		if (timesDrawn >= cmdBufs.size())
+			vkResetCommandBuffer(cmdBufs[i], 0);
+		else
+			timesDrawn++;
+		cmdBufs[i] = context->device->beginCommandBuffer();
+		graph->render(cmdBufs[i], i);
+		vkEndCommandBuffer(cmdBufs[i]);
 
 		return cmdBufs[i];
 	}
 	void buildSwapchainDependants()
 	{
 		graph->createInstances();
-
-		vkFreeCommandBuffers(*context->device, context->device->commandPool, static_cast<uint32_t>(cmdBufs.size()), cmdBufs.data());
-		cmdBufs.resize(context->device->swapchain->swapChainLength);
-		for (uint32_t i = 0; i < cmdBufs.size(); i++) {
-			cmdBufs[i] = context->device->beginCommandBuffer();
-			graph->render(cmdBufs[i], i);
-			vkEndCommandBuffer(cmdBufs[i]);
-		}
 	}
 	void destroySwapchainDependents()
 	{
@@ -200,6 +366,18 @@ public:
 		delete boxMeshBuf;
 		delete matInst;
 		delete mat;
+
+		delete blitMeshBuf;
+		delete blitMatInst;
+		delete blitMat;
+
+		delete shadowpassMat;
+		delete shadowpassMatInst;
+
+		delete cascadeMat;
+		delete cascadeMatInst;
+		delete visualizerMat;
+		delete visualizerMatInstance;
 
 		delete flycam;
 

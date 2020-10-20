@@ -123,11 +123,11 @@ namespace vku {
 		pipeline.basePipelineHandle = VK_NULL_HANDLE; // Optional
 		pipeline.basePipelineIndex = -1; // Optional
 
-		VkPushConstantRange transformPushConst;
-		transformPushConst.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_VERTEX_BIT;
-		transformPushConst.offset = 0;
-		transformPushConst.size = sizeof(glm::mat4);
-		pushConstRanges.push_back(transformPushConst);
+		VkPushConstantRange maxPushConst;
+		maxPushConst.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_VERTEX_BIT;
+		maxPushConst.offset = 0;
+		maxPushConst.size = 128;
+		pushConstRanges.push_back(maxPushConst);
 	}
 
 	VulkanMaterial::VulkanMaterial(VulkanMaterialInfo* const matInfo, Scene* const scene, Pass* const pass) {

@@ -37,7 +37,6 @@ class Engine : public BaseEngine {
 public:
 	Engine() {
 		this->windowTitle = "Empty Demo";
-		//this->debugEnabled = false;
 		this->width = 900;
 		this->height = 900;
 	}
@@ -47,7 +46,7 @@ public:
 
 	RenderGraphSchema* graphSchema;
 	RenderGraph* graph;
-	Pass* main;
+	Pass* mainPass;
 
 	VulkanTexture* skybox;
 	VulkanMeshBuffer* boxMeshBuf;
@@ -110,7 +109,7 @@ public:
 		graph = new RenderGraph(graphSchema, scene, context->device->swapchain->swapChainLength);
 		graph->createLayouts();
 
-		main = graph->getPass("main");
+		mainPass = graph->getPass("main");
 
 		// skyboxes don't care about depth testing / writing
 		VulkanMaterialInfo matInfo(context->device);
@@ -119,7 +118,7 @@ public:
 		matInfo.rasterizer.frontFace = VK_FRONT_FACE_CLOCKWISE;
 		matInfo.shaderStages.push_back({ "res/shaders/skybox/skybox.frag", VK_SHADER_STAGE_FRAGMENT_BIT, {} });
 		matInfo.shaderStages.push_back({ "res/shaders/skybox/skybox.vert", VK_SHADER_STAGE_VERTEX_BIT, {} });
-		mat = new VulkanMaterial(&matInfo, scene, main);
+		mat = new VulkanMaterial(&matInfo, scene, mainPass);
 		matInst = new VulkanMaterialInstance(mat);
 		for (VulkanDescriptorSet* set : matInst->descriptorSets) { set->write(0, skybox); }
 

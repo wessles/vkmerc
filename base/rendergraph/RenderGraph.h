@@ -117,6 +117,9 @@ namespace vku {
 		const AttachmentSchema* schema;
 
 		std::vector<AttachmentInstance> instances;
+
+		// we need a seperate attachment for each MSAA resolve step if schema.resolve=true
+		std::vector<AttachmentInstance> resolveInstances;
 	};
 
 	class RenderGraph {

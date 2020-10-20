@@ -15,6 +15,7 @@ layout(std140, binding = 0) uniform GlobalUniform {
 
 layout(push_constant) uniform pushConstants {
     mat4 transform;
+	uint cascade;
 } pc;
 
 layout(location = 0) in vec3 inPosition;
@@ -24,16 +25,11 @@ layout(location = 3) in vec3 in4;
 layout(location = 4) in vec4 in5;
 
 void main() {
-    vec4 fragPosition = pc.transform * vec4(inPosition, 1.0);
-    gl_Position = 
-#ifdef CASCADE_0
-	global.cascade0
-#endif
-#ifdef CASCADE_1
-	global.cascade0
-#endif
-#ifdef CASCADE_2
-	global.cascade0
-#endif
-	* fragPosition;
+	if(pc.cascade == 0) {
+		gl_Position = global.cascade0 * pc.transform * vec4(inPosition, 1.0);
+	} else if(pc.cascade == 1) {
+		gl_Position = global.cascade1 * pc.transform * vec4(inPosition, 1.0);
+	} else if(pc.cascade == 2) {
+		gl_Position = global.cascade2 * pc.transform * vec4(inPosition, 1.0);
+	}
 }
