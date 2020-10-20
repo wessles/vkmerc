@@ -19,6 +19,7 @@ This is a `C++ 20`  / `Vulkan 1.2` renderer. This has been my primary personal p
 **Soon**  
 ⬜ Cascaded Shadow-maps with Poisson Filtering  
 ⬜ Temporal Antialiasing
+⬜ Implement GPUOpen's VulkanMemoryAllocator
 
 **Later**  
 ⬜ Add `KHR_raytracing` functionality  
