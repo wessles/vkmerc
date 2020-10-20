@@ -81,19 +81,59 @@ vec3 fresnelSchlickRoughness(float cosTheta, vec3 F0, float roughness)
     return F0 + (max(vec3(1.0 - roughness), F0) - F0) * pow(1.0 - cosTheta, 5.0);
 }
 
+
+const int pcfCount = 2;
+const float totalTexels = (pcfCount * 2.0 + 1.0) * (pcfCount * 2.0 + 1.0);
+const float shadowmapSize = 1024.0;
+const float shadowTexelSize = 1.0 / shadowmapSize;
+
+float random(vec4 seed4) {
+	float dot_product = dot(seed4, vec4(12.9898,78.233,45.164,94.673));
+	return fract(sin(dot_product) * 43758.5453);
+}
+
+vec2 rotate(vec2 v, float a) {
+	float s = sin(a);
+	float c = cos(a);
+	mat2 m = mat2(c, -s, s, c);
+	return m * v;
+}
+
+const vec2 poissonDisk[16] = vec2[](
+	vec2( 0.0f, 0.0f ),
+	vec2( -0.5766585165773277f, 0.8126243374282105f ),
+	vec2( -0.9237677607727984f, -0.3579596327367057f ),
+	vec2( 0.8062058671137168f, 0.5898398974519624f ),
+	vec2( -0.1310995526149723f, -0.983252809818838f ),
+	vec2( 0.8193682799756199f, -0.3337801777815311f ),
+	vec2( 0.19911693963625532f, 0.9659833338241128f ),
+	vec2( -0.8322523479006605f, 0.2363326276555715f ),
+	vec2( 0.26186490285491026f, -0.6159577568298416f ),
+	vec2( -0.3604179050541564f, -0.5069675343853017f ),
+	vec2( 0.46657709893065247f, 0.20917002120473202f ),
+	vec2( -0.15341973992963037f, 0.498484383101324f ),
+	vec2( 0.9672633520951874f, 0.11761744355929109f ),
+	vec2( -0.44629088116561516f, -0.051802399930734426f ),
+	vec2( 0.6873546364199118f, -0.7197761501606675f ),
+	vec2( 0.2934478567929312f, 0.5631166718844003f )
+);
+
 // query the shadowmap cascades. 0 = shadow, 1 = lit
 float exposureToSun() {
+	float cascadeScale = 1.0;
 	vec4 cascadeProj4Vec = global.cascade0 * vec4(inPosition, 1.0);
 	vec2 cascadeProj = cascadeProj4Vec.xy;
 	if(cascadeProj.x > -1.0 && cascadeProj.y > -1.0 && cascadeProj.x < 1.0 && cascadeProj.y < 1.0) {
 		// cascade 0 is in quadrant 1 of cascade texture, from <0 0> to <0.5, 0.5>
 		cascadeProj = (cascadeProj+1.0) / 4.0; // -1,1 space -> 0,1 space -> quadrant 1
+		cascadeScale = 50. / 100.;
 	} else {
 		cascadeProj4Vec = global.cascade1 * vec4(inPosition, 1.0);
 		cascadeProj = cascadeProj4Vec.xy;
 		if(cascadeProj.x > -1.0 && cascadeProj.y > -1.0 && cascadeProj.x < 1.0 && cascadeProj.y < 1.0) {
 			// cascade 1 is in quadrant 1 of cascade texture, from <0 0.5> to <1.0, 0.5>
 			cascadeProj = (cascadeProj+1.0) / 4.0 + vec2(0.0, 0.5); // -1,1 space -> 0,1 space -> quadrant 2
+			cascadeScale = 8. / 100.;
 		} else {
 			cascadeProj4Vec = global.cascade2 * vec4(inPosition, 1.0);
 			cascadeProj = cascadeProj4Vec.xy;
@@ -103,12 +143,22 @@ float exposureToSun() {
 			}
 		}
 	}
+	
+	float shadowing = 1.0;
+	for (int i=0; i<16; i++){
+		float poissonAtten = random(vec4(cascadeProj.xy, 0.0, 0.0));
+		
+		vec2 poisson = poissonDisk[i] * cascadeScale / 100.0;
+		poisson = rotate(poisson, poissonAtten);
+				
+		vec2 samplept = cascadeProj.xy + poisson;
+		if(samplept.x > 1.0 || samplept.x < 0.0 || samplept.y > 1.0 || samplept.y < 0.0) {
+			continue;
+		}
+		shadowing -= (1.0/(16.0)) * (1.0 - float(texture(cascade, samplept).r - cascadeProj4Vec.z > 0.001));
+	}
 
-	float mapZ = texture(cascade, cascadeProj.xy).r;
-	float myZ = cascadeProj4Vec.z;
-
-	if(mapZ + 0.01 < myZ) return 0.0;
-	return 1.0;
+	return shadowing;
 }
 
 // cook-torrance BRDF
