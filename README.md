@@ -1,7 +1,7 @@
 
 # `vkmerc`
 
-![The Helmet Demo](https://i.imgur.com/oLvEUgt.png)
+![The CSM Demo](https://i.imgur.com/RyeCnPB.png)
 
 This is a `C++ 20`  / `Vulkan 1.2` renderer. This has been my primary personal project since August 2020.
 
