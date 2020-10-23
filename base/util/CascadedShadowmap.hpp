@@ -6,7 +6,7 @@
 #include <glm/gtx/transform.hpp>
 
 namespace vku {
-	glm::mat4 fitLightProjMatToCameraFrustum(glm::mat4 frustumMat, glm::vec4 lightDirection, float dim, glm::mat4 sceneAABB, float* worldSpaceDim, bool square = false, bool roundToPixelSize = false) {
+	glm::mat4 fitLightProjMatToCameraFrustum(glm::mat4 frustumMat, glm::vec4 lightDirection, float dim, glm::mat4 sceneAABB, float* worldSpaceDim, bool square = false, bool roundToPixelSize = false, bool useConstantSize = false) {
 		// multiply by inverse projection*view matrix to find frustum vertices in world space
 		// transform to light space
 		// same pass, find minimum along each axis
@@ -16,8 +16,7 @@ namespace vku {
 		glm::vec3 boundingA(std::numeric_limits<float>::infinity());
 		glm::vec3 boundingB(-std::numeric_limits<float>::infinity());
 
-		// start with <-1 -1 0> to <1 1 1> cube
-		// notice we use z:[0, 1] clip space, unlike openGL's z:[-1, 1]
+		// start with <-1 -1 -1> to <1 1 1> cube
 		std::vector<glm::vec4> boundingVertices = {
 			{-1.0f,	-1.0f,	-1.0f,	1.0f},
 			{-1.0f,	-1.0f,	1.0f,	1.0f},
@@ -75,22 +74,24 @@ namespace vku {
 		float n = boundingA.z;
 		float f = boundingB.z;
 
-		float constantSize = std::max(r - l, t - b);
-		// uncomment this to keep constant world-size resolution, side length = diagonal of largest face of frustum
-		// the other option looks good at high resolutions, but can result in shimmering as you look in different directions and the cascade changes size
-		// float constantSize = glm::length(glm::vec3(boundingVertices[7]) - glm::vec3(boundingVertices[0])) * 2.0;
+		float actualSize = std::max(r - l, t - b);
+		if (useConstantSize) {
+			// keep constant world-size resolution, side length = diagonal of largest face of frustum
+			// the other option looks good at high resolutions, but can result in shimmering as you look in different directions and the cascade changes size
+			 actualSize = glm::length(glm::vec3(boundingVertices[7]) - glm::vec3(boundingVertices[1]));
+		}
 
-		*worldSpaceDim = constantSize;
+		*worldSpaceDim = actualSize;
 
-		// make it square, with side length of max(r-l,t-b)
+		// make it square
 		if (square) {
 			float W = r - l, H = t - b;
-			float diff = constantSize - H;
+			float diff = actualSize - H;
 			if (diff > 0) {
 				t += diff / 2.0f;
 				b -= diff / 2.0f;
 			}
-			diff = constantSize - W;
+			diff = actualSize - W;
 			if (diff > 0) {
 				r += diff / 2.0f;
 				l -= diff / 2.0f;
@@ -99,7 +100,7 @@ namespace vku {
 
 		// avoid shimmering
 		if (roundToPixelSize) {
-			float pixelSize = constantSize / dim;
+			float pixelSize = actualSize / dim;
 			l = std::round(l / pixelSize) * pixelSize;
 			r = std::round(r / pixelSize) * pixelSize;
 			b = std::round(b / pixelSize) * pixelSize;

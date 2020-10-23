@@ -318,6 +318,8 @@ public:
 	bool enableDebugView = false;
 	int currentFrustum = 0;
 
+	bool useConstantSize = true;
+
 	float n = .01f;
 	float f = 100.0f;
 	float split1 = 2.0f/100.0f, split2 = 15.0f/100.0f;
@@ -362,13 +364,13 @@ public:
 		testFrusta[2] = camTransform * glm::inverse(flycam->getProjMatrix(width, height, half, f, savedCamFOV));
 
 		float size;
-		cascades.cascades[0] = fitLightProjMatToCameraFrustum(testFrusta[0], global.directionalLight, SHADOWMAP_CASCADE_SIZE, sceneAABB, &size, keepCascadesSquare, roundCascadesToPixel);
+		cascades.cascades[0] = fitLightProjMatToCameraFrustum(testFrusta[0], global.directionalLight, SHADOWMAP_CASCADE_SIZE, sceneAABB, &size, keepCascadesSquare, roundCascadesToPixel, useConstantSize);
 		cascades.data[0][1] = slopeBias * size;
 		cascades.data[0][0] = baseBias * size;
-		cascades.cascades[1] = fitLightProjMatToCameraFrustum(testFrusta[1], global.directionalLight, SHADOWMAP_CASCADE_SIZE, sceneAABB, &size, keepCascadesSquare, roundCascadesToPixel);
+		cascades.cascades[1] = fitLightProjMatToCameraFrustum(testFrusta[1], global.directionalLight, SHADOWMAP_CASCADE_SIZE, sceneAABB, &size, keepCascadesSquare, roundCascadesToPixel, useConstantSize);
 		cascades.data[1][1] = slopeBias * size;
 		cascades.data[1][0] = baseBias * size;
-		cascades.cascades[2] = fitLightProjMatToCameraFrustum(testFrusta[2], global.directionalLight, SHADOWMAP_CASCADE_SIZE, sceneAABB, &size, keepCascadesSquare, roundCascadesToPixel);
+		cascades.cascades[2] = fitLightProjMatToCameraFrustum(testFrusta[2], global.directionalLight, SHADOWMAP_CASCADE_SIZE, sceneAABB, &size, keepCascadesSquare, roundCascadesToPixel, useConstantSize);
 		cascades.data[2][1] = slopeBias * size;
 		cascades.data[2][0] = baseBias * size;
 
@@ -401,6 +403,7 @@ public:
 		ImGui::NewLine();
 
 		ImGui::Text("Cascade Options", "");
+		ImGui::Checkbox("Keep Cascades at Constant Size", &useConstantSize);
 		ImGui::Checkbox("Keep Cascades Square", &keepCascadesSquare);
 		ImGui::Checkbox("Round Cascades to Pixel Size", &roundCascadesToPixel);
 
