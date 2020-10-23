@@ -39,5 +39,3 @@ This is a `C++ 20`  / `Vulkan 1.2` renderer. This has been my primary personal p
 In practice, just run the installer for `Vulkan 1.2 SDK` so it shows up in your `C://` drive; the build should work out of the box on Visual Studio.
 
 Also, if you're on Windows, **make sure to enable Developer mode**. Otherwise you can't make symlinks as a non-admin, which is required for the build process. This is because of a "security feature" enacted by Windows Vista. Thanks again Vista!
-
-I assume you're using drivers that support the `KHR_raytracing` extension. *(At time of writing, this means you must have beta Nvidia Vulkan drivers installed.)*
