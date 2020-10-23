@@ -17,9 +17,6 @@ namespace vku {
 
 	struct SceneGlobalUniform
 	{
-		glm::mat4 cascade0;
-		glm::mat4 cascade1;
-		glm::mat4 cascade2;
 		glm::mat4 view;
 		glm::mat4 proj;
 		glm::vec4 camPos;
@@ -29,6 +26,8 @@ namespace vku {
 	};
 
 	struct SceneInfo {
+		// list of sizes of uniform buffers to install at binding. Default SceneGlobalUniform
+		std::vector<size_t> uniformAllocSizes{ sizeof(SceneGlobalUniform) };
 	};
 
 	struct Scene {
@@ -36,7 +35,7 @@ namespace vku {
 		VulkanDescriptorSetLayout* globalDescriptorSetLayout;
 		VkPipelineLayout globalPipelineLayout;
 		std::vector<VulkanDescriptorSet*> globalDescriptorSets;
-		std::vector<VulkanUniform*> globalUniforms;
+		std::vector<std::vector<VulkanUniform*>> globalUniforms;
 
 		std::vector<Object*> objects{};
 
@@ -46,6 +45,8 @@ namespace vku {
 		void addObject(Object* object);
 		void render(VkCommandBuffer cmdBuf, uint32_t swapIdx, bool noMaterial);
 
-		void updateUniforms(uint32_t i, SceneGlobalUniform* uniform);
+		void updateUniforms(uint32_t swapIdx, uint32_t uniformIdx, void* data);
+
+		glm::mat4 getAABBTransform();
 	};
 }

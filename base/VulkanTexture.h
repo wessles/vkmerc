@@ -88,6 +88,8 @@ namespace vku {
 		VkFilter magFilter = VK_FILTER_LINEAR;
 		float minLod = 0.0f;
 		float maxLod = 1.0f;
+		VkCompareOp compareOp{};
+		VkBool32 compareEnable = VK_FALSE;
 	};
 
 	struct VulkanSampler {

@@ -379,7 +379,7 @@ namespace vku {
 		pushBlockPtrs.resize(numMips);
 		for (uint32_t i = 0; i < numMips; i++) {
 			pushBlocks[i].roughness = (float)i / (float)(numMips - 1);
-			pushBlocks[i].numSamples = 128u;
+			pushBlocks[i].numSamples = 512u;
 			pushBlockPtrs[i] = &pushBlocks[i];
 		}
 

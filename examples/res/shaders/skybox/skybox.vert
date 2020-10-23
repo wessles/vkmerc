@@ -1,11 +1,7 @@
 #version 450
 #extension GL_ARB_separate_shader_objects : enable
 
-
 layout(std140, binding = 0) uniform GlobalUniform {
-	mat4 cascade0;
-	mat4 cascade1;
-	mat4 cascade2;
 	mat4 view;
 	mat4 proj;
 	vec4 camPos;

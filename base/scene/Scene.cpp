@@ -16,7 +16,12 @@
 namespace vku {
 	Scene::Scene(VulkanDevice* device, SceneInfo info) {
 		this->device = device;
-		this->globalDescriptorSetLayout = new VulkanDescriptorSetLayout(device, { {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_ALL_GRAPHICS} });
+		std::vector<DescriptorLayout> descriptorLayouts{};
+		for (uint32_t i = 0; i < info.uniformAllocSizes.size(); i++) {
+			descriptorLayouts.push_back({ VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_ALL_GRAPHICS });
+		}
+
+		this->globalDescriptorSetLayout = new VulkanDescriptorSetLayout(device, descriptorLayouts);
 
 		{
 			VkPushConstantRange range{};
@@ -42,9 +47,12 @@ namespace vku {
 		this->globalUniforms.resize(n);
 		this->globalDescriptorSets.resize(n);
 		for (uint32_t i = 0; i < n; i++) {
-			globalUniforms[i] = new VulkanUniform(device, sizeof(SceneGlobalUniform));
 			globalDescriptorSets[i] = new VulkanDescriptorSet(globalDescriptorSetLayout);
-			globalDescriptorSets[i]->write(0, globalUniforms[i]);
+			globalUniforms[i].resize(info.uniformAllocSizes.size());
+			for (uint32_t k = 0; k < globalUniforms[i].size(); k++) {
+				globalUniforms[i][k] = new VulkanUniform(device, info.uniformAllocSizes[k]);
+				globalDescriptorSets[i]->write(k, globalUniforms[i][k]);
+			}
 		}
 	}
 
@@ -55,8 +63,11 @@ namespace vku {
 
 		vkDestroyPipelineLayout(*device, globalPipelineLayout, nullptr);
 		delete globalDescriptorSetLayout;
-		for (VulkanUniform* uni : globalUniforms)
-			delete uni;
+		for (auto uniforms : globalUniforms) {
+			for (VulkanUniform *uniform : uniforms) {
+				delete uniform;
+			}
+		}
 	}
 
 	void Scene::addObject(Object* object) {
@@ -69,7 +80,27 @@ namespace vku {
 		}
 	}
 
-	void Scene::updateUniforms(uint32_t i, SceneGlobalUniform* uniform) {
-		globalUniforms[i]->write(uniform);
+	void Scene::updateUniforms(uint32_t swapIdx, uint32_t uniformIdx, void* data) {
+		globalUniforms[swapIdx][uniformIdx]->write(data);
+	}
+
+	glm::mat4 Scene::getAABBTransform() {
+		glm::vec3 min = glm::vec3(std::numeric_limits<float>::infinity());
+		glm::vec3 max = glm::vec3(-std::numeric_limits<float>::infinity());
+
+		for (auto* obj : objects) {
+			glm::mat4 aabb = obj->getAABBTransform();
+			for (uint32_t i = 0; i < 2; i++) {
+				for (uint32_t j = 0; j < 2; j++) {
+					for (uint32_t k = 0; k < 2; k++) {
+						glm::vec3 v = glm::vec3(aabb * glm::vec4(i,j,k,1));
+						min = glm::min(v, min);
+						max = glm::max(v, max);
+					}
+				}
+			}
+		}
+
+		return glm::translate(glm::mat4(1.0f), min) * glm::scale(glm::mat4(1.0f), max - min);
 	}
 }

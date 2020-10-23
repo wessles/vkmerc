@@ -119,8 +119,6 @@ namespace vku {
 				for (auto& edge : schema.in) {
 					if (!edge->isInputAttachment) continue;
 
-					bool isDepth = edge->format == this->device->swapchain->depthFormat;
-
 					VkAttachmentDescription attachment{};
 					attachment.format = edge->format;
 					attachment.samples = edge->samples;
@@ -128,7 +126,7 @@ namespace vku {
 					attachment.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
 					attachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
 					attachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-					if (isDepth) {
+					if (edge->isDepth) {
 						attachment.initialLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 						attachment.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
 					}
@@ -147,25 +145,29 @@ namespace vku {
 				AttachmentSchema* swapchainAttachmentSchema = nullptr;
 
 				for (AttachmentSchema* edge : schema.out) {
-					bool isDepth = edge->format == this->device->swapchain->depthFormat;
-
 					VkAttachmentDescription attachment{};
 					attachment.format = edge->format;
 					attachment.samples = edge->samples;
-					attachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+					if (edge->clearOnLoad) {
+						attachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+						attachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+					}
+					else {
+						attachment.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+						attachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+					}
 					attachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-					attachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
 					attachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
 					attachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 
-					if (isDepth) {
+					if (edge->isDepth) {
 						attachment.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
 					}
 					else {
 						attachment.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 					}
 
-					if (edge->isSwapchain && isDepth) {
+					if (edge->isSwapchain && edge->isDepth) {
 						throw std::runtime_error("Cannot present a depth layout image!");
 					}
 
@@ -181,7 +183,7 @@ namespace vku {
 						attachment.finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 					}
 
-					if (isDepth) {
+					if (edge->isDepth) {
 						if (depthWrite) {
 							throw std::runtime_error("Cannot write to multiple depth attachments!");
 						}
@@ -370,11 +372,9 @@ namespace vku {
 						continue;
 					}
 
-					bool isDepth = schema->format == device->swapchain->depthFormat;
-
 					VkImageUsageFlags usage;
 					VkImageAspectFlags aspect;
-					if (isDepth) {
+					if (edge->schema->isDepth) {
 						usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
 						aspect = VK_IMAGE_ASPECT_DEPTH_BIT;
 					}
@@ -419,7 +419,7 @@ namespace vku {
 						edge->resolveInstances[i] = { new VulkanTexture(device, texInfo) };
 					}
 
-					if (isDepth) {
+					if (edge->schema->isDepth) {
 						edge->instances[i].texture->image->transitionImageLayout(VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
 					}
 				}
@@ -555,16 +555,15 @@ namespace vku {
 
 		for (auto& node : nodes) {
 			std::vector<VkClearValue> clearValues{};
+			VkClearValue clear;
 			for (Attachment* edge : node->in) {
-				VkClearValue clear{};
-				clear.color = { 0.0f, 0.0f, 0.0f, 1.0f };
-				clear.depthStencil = { 1, 0 };
+				clear.color = edge->schema->clearColor;
+				clear.depthStencil = edge->schema->clearDepthStencil;
 				clearValues.push_back(clear);
 			}
 			for (Attachment* edge : node->out) {
-				VkClearValue clear{};
-				clear.color = { 1.0f, 1.0f, 1.0f, 1.0f };
-				clear.depthStencil = { 1, 0 };
+				clear.color = edge->schema->clearColor;
+				clear.depthStencil = edge->schema->clearDepthStencil;
 				clearValues.push_back(clear);
 			}
 

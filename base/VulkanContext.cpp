@@ -18,7 +18,7 @@ namespace vku {
 				std::cin.get();
 			}
 		}
-		
+
 		return VK_TRUE;
 	}
 	bool checkValidationLayerSupport(const std::vector<const char*>& validationLayers) {
@@ -108,7 +108,15 @@ namespace vku {
 		glfwInit();
 		glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
 		glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
-		this->windowHandle = glfwCreateWindow(info.width, info.height, info.title.c_str(), nullptr, nullptr);
+		GLFWmonitor* monitor = nullptr;
+		uint32_t width = info.width, height = info.height;
+		if (info.fullscreen) {
+			monitor = glfwGetPrimaryMonitor();
+			const GLFWvidmode* mode = glfwGetVideoMode(monitor);
+			width = mode->width;
+			height = mode->height;
+		}
+		this->windowHandle = glfwCreateWindow(width, height, info.title.c_str(), monitor, nullptr);
 		glfwSetWindowUserPointer(windowHandle, this);
 		glfwSetFramebufferSizeCallback(windowHandle, framebufferResizeCallback);
 	}

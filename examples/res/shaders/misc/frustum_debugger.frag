@@ -2,9 +2,6 @@
 #extension GL_ARB_separate_shader_objects : enable
 
 layout(std140, binding = 0) uniform GlobalUniform {
-	mat4 cascade0;
-	mat4 cascade1;
-	mat4 cascade2;
 	mat4 view;
 	mat4 proj;
 	vec4 camPos;
@@ -16,6 +13,7 @@ layout(std140, binding = 0) uniform GlobalUniform {
 layout(push_constant) uniform pushConstants {
     mat4 transform;
 	vec4 color;
+	bool mode;
 } pc;
 
 layout(location = 0) in vec3 inPosition;
@@ -25,5 +23,6 @@ layout(location = 0) out vec4 outColor;
 void main()
 {
 	outColor = pc.color;
-	outColor.rgb *= (1.0 - fract(inPosition.y * 2.0)*0.5);
+	if(pc.mode)
+		outColor.rgb *= fract(inPosition.z * 4.0);
 }

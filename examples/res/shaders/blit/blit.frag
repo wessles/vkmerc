@@ -22,4 +22,5 @@ layout(location = 0) out vec4 outColor;
 void main()
 {
 	outColor.rgb = texture(tex_screenbuf, inTexCoord).rgb;
+	outColor.r = 1.0;
 }

@@ -14,21 +14,22 @@ This is a `C++ 20`  / `Vulkan 1.2` renderer. This has been my primary personal p
 ✅ Physically Based Rendering  
 ✅ Cubemap filtering suite for IBL  
 ✅ GLTF 2.0 Model Loading  
-✅ .OBJ Model / .MTL Material Loading
+✅ .OBJ Model / .MTL Material Loading  
 
 **Soon**  
 ⬜ Cascaded Shadow-maps with Poisson Filtering  
-⬜ Temporal Antialiasing
-⬜ Implement GPUOpen's VulkanMemoryAllocator
+⬜ Temporal Antialiasing  
 
 **Later**  
-⬜ Add `KHR_raytracing` functionality  
-⬜ Add better support for Linux and Mac  
+⬜ Switch from push-constant transforms to SSBO for per-object data  
+⬜ Implement GPUOpen's VulkanMemoryAllocator  
 ⬜ Implement `Imgui` for in-demo user interfaces  
 ⬜ Additional abstractions for descriptors in Material system  
+⬜ Add better support for Linux and Mac  
+⬜ Add `KHR_raytracing` functionality  
 ⬜ Implement support for sandboxed scripting using `Typescript`  
 ⬜ Serialized format to represent scenes, materials, etc. (similar to .scene files in Unity)  
-⬜ Dedicated scene editor program
+⬜ Dedicated scene editor program  
 
 ## Installation
 

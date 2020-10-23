@@ -79,12 +79,12 @@ public:
 		// load skybox texture
 		skybox = new VulkanTexture;
 		skybox->image = new VulkanImage(context->device, {
-			"res/cubemap/posx.jpg",
-			"res/cubemap/negx.jpg",
-			"res/cubemap/posy.jpg",
-			"res/cubemap/negy.jpg",
-			"res/cubemap/posz.jpg",
-			"res/cubemap/negz.jpg"
+			"res/textures/cubemap_day/posx.jpg",
+			"res/textures/cubemap_day/negx.jpg",
+			"res/textures/cubemap_day/posy.jpg",
+			"res/textures/cubemap_day/negy.jpg",
+			"res/textures/cubemap_day/posz.jpg",
+			"res/textures/cubemap_day/negz.jpg"
 			});
 		VulkanImageViewInfo viewInfo{};
 		skybox->image->writeImageViewInfo(&viewInfo);
@@ -124,6 +124,7 @@ public:
 			depth->format = context->device->swapchain->depthFormat;
 			depth->samples = msaaCount;
 			depth->isTransient = true;
+			depth->isDepth = true;
 
 			AttachmentSchema* swap = graphSchema->attachment("swap", blit, {});
 			swap->format = context->device->swapchain->screenFormat;
@@ -177,8 +178,6 @@ public:
 
 		float n = 0.01f;
 		float f = 20.0f;
-		float half = (n + f) / 2.0f;
-		float quarter = (n + half) / 2.0f;
 
 		SceneGlobalUniform global{};
 		glm::mat4 transform = flycam->getTransform();
@@ -190,7 +189,7 @@ public:
 		global.time = time;
 		global.directionalLight = glm::rotate(glm::mat4(1.0), time, glm::vec3(0.0, 1.0, 0.0)) * glm::vec4(1.0, -1.0, 0.0, 0.0);
 
-		scene->updateUniforms(i, &global);
+		scene->updateUniforms(i, 0, &global);
 	}
 
 	VkCommandBuffer draw(uint32_t i)

@@ -32,7 +32,7 @@ namespace vku {
 		glm::vec4 albedo;
 		glm::vec4 emissive;
 		glm::float32 metallic;
-		glm::float32 roughnesss;
+		glm::float32 roughness;
 	};
 
 	struct TexturelessPbrMaterial {

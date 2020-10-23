@@ -4,6 +4,7 @@
 #include <filesystem>
 
 #include <glm/glm.hpp>
+#include <glm/gtx/string_cast.hpp>
 
 #define TINYOBJLOADER_IMPLEMENTATION
 #include <tiny_obj_loader.h>
@@ -58,6 +59,14 @@ namespace vku {
 					attrib.vertices[3 * index.vertex_index + 2]
 				};
 
+				// calculate bounding box
+				min.x = std::min(min.x, vertex.pos.x);
+				min.y = std::min(min.y, vertex.pos.y);
+				min.z = std::min(min.z, vertex.pos.z);
+				max.x = std::max(max.x, vertex.pos.x);
+				max.y = std::max(max.y, vertex.pos.y);
+				max.z = std::max(max.z, vertex.pos.z);
+
 				vertex.normal = {
 					attrib.normals[3 * index.normal_index + 0],
 					attrib.normals[3 * index.normal_index + 1],
@@ -80,6 +89,8 @@ namespace vku {
 			}
 		}
 
+		aabb = glm::translate(glm::mat4(1.0f), min) * glm::scale(glm::mat4(1.0f), max - min);
+
 		this->meshBuf = new VulkanMeshBuffer(scene->device, meshData);
 
 		// load material, based on default Blender BSDF .mtl export
@@ -95,7 +106,7 @@ namespace vku {
 			uniform.albedo = albedo;
 			uniform.emissive = emission;
 			uniform.metallic = metallic;
-			uniform.roughnesss = roughness;
+			uniform.roughness = roughness;
 			this->mat = new TexturelessPbrMaterial(uniform, specular_ibl, diffuse_ibl, brdf_lut, scene, pass, macros);
 		}
 	}
@@ -112,5 +123,10 @@ namespace vku {
 		}
 		vkCmdPushConstants(cmdBuf, mat->mat->pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(glm::mat4), &this->localTransform);
 		meshBuf->draw(cmdBuf);
+	}
+
+	glm::mat4 VulkanObjModel::getAABBTransform()
+	{
+		return localTransform * aabb;
 	}
 }

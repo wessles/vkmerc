@@ -2,9 +2,6 @@
 #extension GL_ARB_separate_shader_objects : enable
 
 layout(std140, binding = 0) uniform GlobalUniform {
-	mat4 cascade0;
-	mat4 cascade1;
-	mat4 cascade2;
 	mat4 view;
 	mat4 proj;
 	vec4 camPos;
@@ -13,7 +10,14 @@ layout(std140, binding = 0) uniform GlobalUniform {
 	float time;
 } global;
 
-layout(set=1, binding=0) uniform sampler2D cascade;
+#ifdef USE_CASCADES
+layout(std140, binding = 1) uniform CascadesUniform {
+	mat4 cascades[4];
+	vec4 data[4];
+} cascades;
+#endif
+
+layout(set=1, binding=0) uniform sampler2DShadow cascade;
 
 layout(set=2, binding=0) uniform sampler2D tex_albedo;
 layout(set=2, binding=1) uniform sampler2D tex_normal;
@@ -79,35 +83,47 @@ vec3 fresnelSchlickRoughness(float cosTheta, vec3 F0, float roughness)
     return F0 + (max(vec3(1.0 - roughness), F0) - F0) * pow(1.0 - cosTheta, 5.0);
 }
 
+#ifdef USE_CASCADES
+vec2 transformToCascadeQuadrant(vec2 p, int i) {
+	p = (p+1.0)/4.0;
+	vec2 o = vec2(0.0);
+	// {0, 1, 2, 3} --> {0, 0.5, 0, 0.5}
+	o.y = float(i % 2) / 2.0;
+	// {0, 1, 2, 3} --> {0, 0, 0.5, 0.5}
+	o.x = floor(float(i) / 2.0) / 2.0;
+	return o+p;
+}
+
 // query the shadowmap cascades. 0 = shadow, 1 = lit
 float exposureToSun() {
-	vec4 cascadeProj4Vec = global.cascade0 * vec4(inPosition, 1.0);
-	vec2 cascadeProj = cascadeProj4Vec.xy;
-	if(cascadeProj.x > -1.0 && cascadeProj.y > -1.0 && cascadeProj.x < 1.0 && cascadeProj.y < 1.0) {
-		// cascade 0 is in quadrant 1 of cascade texture, from <0 0> to <0.5, 0.5>
-		cascadeProj = (cascadeProj+1.0) / 4.0; // -1,1 space -> 0,1 space -> quadrant 1
-	} else {
-		cascadeProj4Vec = global.cascade1 * vec4(inPosition, 1.0);
-		cascadeProj = cascadeProj4Vec.xy;
+	vec4 cascadeProj;
+	float bias, slopeBias;
+
+	bool foundMatch = false;
+
+	for(int i = 0; i < 3; i++) {
+		cascadeProj = cascades.cascades[i] * vec4(inPosition, 1.0);
+		
 		if(cascadeProj.x > -1.0 && cascadeProj.y > -1.0 && cascadeProj.x < 1.0 && cascadeProj.y < 1.0) {
-			// cascade 1 is in quadrant 1 of cascade texture, from <0 0.5> to <1.0, 0.5>
-			cascadeProj = (cascadeProj+1.0) / 4.0 + vec2(0.0, 0.5); // -1,1 space -> 0,1 space -> quadrant 2
-		} else {
-			cascadeProj4Vec = global.cascade2 * vec4(inPosition, 1.0);
-			cascadeProj = cascadeProj4Vec.xy;
-			if(cascadeProj.x > -1.0 && cascadeProj.y > -1.0 && cascadeProj.x < 1.0 && cascadeProj.y < 1.0) {
-				// cascade 2 is in quadrant 3 of cascade texture, from <0.5 0> to <1.0, 0.5>
-				cascadeProj = (cascadeProj+1.0) / 4.0 + vec2(0.5, 0.0); // -1,1 space -> 0,1 space -> quadrant 3
-			}
+			cascadeProj.xy = transformToCascadeQuadrant(cascadeProj.xy, i);
+			bias = cascades.data[i][0];
+			slopeBias = cascades.data[i][1];
+			foundMatch = true;
+			break;
 		}
 	}
 
-	float mapZ = texture(cascade, cascadeProj.xy).r;
-	float myZ = cascadeProj4Vec.z;
+	if(!foundMatch) return 1.0;
 
-	if(mapZ + 0.01 < myZ) return 0.0;
-	return 1.0;
+	// slope scale biasing
+	float NoL = max(0.0, dot(-inNormal, global.directionalLight.xyz));
+	float totalBias = bias + slopeBias * tan(acos(NoL));
+
+	return texture(cascade, cascadeProj.xyz - vec3(0., 0., totalBias));
 }
+#else
+float exposureToSun() { return 1.0; }
+#endif
 
 // cook-torrance BRDF
 vec3 brdf(vec3 c, vec3 n, vec3 wo, vec3 wi, float m, float r, vec3 F0) {
@@ -120,11 +136,16 @@ vec3 brdf(vec3 c, vec3 n, vec3 wo, vec3 wi, float m, float r, vec3 F0) {
 	
 	vec3 Ks = 1.0 - F;
 
-	return (Ks * c / PI + D*F*G/(4*WoDotN * WiDotN)) * WiDotN * exposureToSun();
+	return (Ks * c / PI +  D*F*G/(4*WoDotN * WiDotN)) * WiDotN;
 }
 
 vec3 reflectance(vec3 c, vec3 p, vec3 n, vec3 wo, float m, float r, vec3 F0) {
-	return brdf(c, n, wo, -global.directionalLight.xyz, m, r, F0);
+	vec3 sun = brdf(c, n, wo, -global.directionalLight.xyz, m, r, F0);
+#ifdef SUN_STRENGTH
+	sun *= SUN_STRENGTH;
+#endif
+	sun *= exposureToSun();
+	return sun;
 }
 
 vec3 getNormal() {

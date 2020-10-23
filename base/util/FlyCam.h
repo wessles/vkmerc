@@ -19,7 +19,8 @@ private:
 public:
 	FlyCam(GLFWwindow*);
 	void update();
+	float getFOV();
 	glm::mat4 getTransform();
-	glm::mat4 getProjMatrix(float width, float height, float zMin = 0.01f, float zMax = 20.0f);
+	glm::mat4 getProjMatrix(float width, float height, float zMin = 0.01f, float zMax = 20.0f, float FOV = -1);
 };
 

@@ -14,9 +14,9 @@ endfunction()
 
 # list all demos here
 demo("CascadedShadowmapDemo")
-demo("KhrRaytraceDemo")
 demo("MultisampleBlitDemo")
 demo("HelmetDemo")
+demo("ImguiDemo")
 demo("EmptyDemo")
 
 file(CREATE_LINK "${CMAKE_SOURCE_DIR}/examples/res/" "${CMAKE_CURRENT_BINARY_DIR}/res/" SYMBOLIC)

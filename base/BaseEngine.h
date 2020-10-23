@@ -34,6 +34,7 @@ namespace vku {
 
 	protected:
 		std::string windowTitle = "Untitled";
+		bool fullscreen = false;
 		double framerateLimit = 120.0;
 		uint32_t width = 800, height = 600;
 		bool debugEnabled = true;
@@ -57,6 +58,7 @@ namespace vku {
 			info.height = height;
 			info.debugEnabled = debugEnabled;
 			info.haltOnValidationError = false;
+			info.fullscreen = fullscreen;
 
 			const auto& resizeCallback = [this](GLFWwindow* window, int width, int height) { framebufferResized = true; };
 			const auto& resizeCallbackFunc = std::function<void(GLFWwindow*, int, int)>(resizeCallback);

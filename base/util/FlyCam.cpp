@@ -99,6 +99,10 @@ void FlyCam::update() {
 	if (rotation.x < -pio2) rotation.x = -pio2;
 }
 
+float FlyCam::getFOV() {
+	return FOV;
+}
+
 glm::mat4 FlyCam::getTransform()
 {
 	glm::mat4 transform = glm::mat4(1.0f);
@@ -109,8 +113,10 @@ glm::mat4 FlyCam::getTransform()
 	return transform;
 }
 
-glm::mat4 FlyCam::getProjMatrix(float width, float height, float zMin, float zMax)
+glm::mat4 FlyCam::getProjMatrix(float width, float height, float zMin, float zMax, float FOV)
 {
+	if (FOV < 0)
+		FOV = this->FOV;
 	glm::mat4 proj = glm::perspective(glm::radians(FOV), width / height, zMin, zMax);
 	proj[1][1] *= -1;
 	return proj;

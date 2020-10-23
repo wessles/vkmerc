@@ -44,6 +44,8 @@ namespace vku {
 
 		VulkanMeshBuffer* meshBuf;
 
+		glm::mat4 aabb;
+
 		std::vector<VulkanTexture*> textures;
 		std::vector<PbrMaterial*> materials;
 		std::vector<Node> nodes;
@@ -84,6 +86,8 @@ namespace vku {
 
 			MikktCalculator mikkt;
 			mikkt.generateTangentSpace(&meshData);
+
+			aabb = glm::translate(glm::mat4(1.0f), min) * glm::scale(glm::mat4(1.0f), max - min);
 
 			meshBuf = new VulkanMeshBuffer(scene->device, meshData);
 		}
@@ -297,6 +301,22 @@ namespace vku {
 							vert.texCoord = texCoordsBuffer ? glm::make_vec2(&texCoordsBuffer[v * 2]) : glm::vec3(0.0f);
 							vert.color = glm::vec3(1.0f);
 							vertexBuffer.push_back(vert);
+
+							// calculate bounding box
+							glm::vec4 transformedVert = glm::vec4(vert.pos, 1.0f);
+							glm::mat4 nodeMatrix = node.matrix;
+							Node* currentParent = node.parent;
+							while (currentParent) {
+								nodeMatrix = currentParent->matrix * nodeMatrix;
+								currentParent = currentParent->parent;
+							}
+							transformedVert = nodeMatrix * transformedVert;
+							min.x = std::min(min.x, transformedVert.x);
+							min.y = std::min(min.y, transformedVert.y);
+							min.z = std::min(min.z, transformedVert.z);
+							max.x = std::max(max.x, transformedVert.x);
+							max.y = std::max(max.y, transformedVert.y);
+							max.z = std::max(max.z, transformedVert.z);
 						}
 					}
 					// Indices
@@ -363,6 +383,7 @@ namespace vku {
 					nodeMatrix = currentParent->matrix * nodeMatrix;
 					currentParent = currentParent->parent;
 				}
+				nodeMatrix = localTransform * nodeMatrix;
 
 				for (Primitive& primitive : node.mesh.primitives) {
 					if (primitive.indexCount > 0) {
@@ -389,6 +410,10 @@ namespace vku {
 			for (auto& node : nodes) {
 				drawNode(cmdBuf, swapIdx, node, noMaterial);
 			}
+		}
+
+		virtual glm::mat4 getAABBTransform() override {
+			return localTransform * aabb;
 		}
 
 		~VulkanGltfModel() {

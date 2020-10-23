@@ -1,4 +1,4 @@
-﻿#define SHADOWMAP_CASCADE_SIZE 1024
+﻿#define SHADOWMAP_CASCADE_SIZE 2048
 
 #include <iostream>
 #include <filesystem>
@@ -32,22 +32,26 @@
 #include <glm/glm.hpp>
 #include <glm/gtx/transform.hpp>
 #include <glm/gtx/string_cast.hpp>
+#include <imgui\VulkanImguiInstance.hpp>
 
 using namespace std;
 using namespace vku;
 
-// has to be static for glfw callback, unfortunately
-namespace csmdemostate {
-	static bool paused = false;
-	static bool showViewFrust = false;
-	static bool showCascFrust = false;
-	static int currentFrustum = -1;
-}
+struct CascadesUniform {
+	glm::mat4 cascades[4];
+	glm::vec4 data[4] = {
+		{0.0f, 0.00003f, 0, 0},
+		{0.0f, 0.00014f, 0, 0},
+		{0.0f, 0.00037f, 0, 0},
+		{}
+	};
+};
 
 class Engine : public BaseEngine {
 public:
 	Engine() {
 		this->windowTitle = "Cascaded Shadowmap Demo";
+		//this->fullscreen = true;
 		this->width = 900;
 		this->height = 900;
 	}
@@ -61,6 +65,8 @@ public:
 	Pass* mainPass;
 	Pass* blitPass;
 
+	VulkanImguiInstance* guiInstance;
+
 	VulkanMaterial* shadowpassMat;
 	VulkanMaterialInstance* shadowpassMatInst;
 
@@ -68,6 +74,7 @@ public:
 	VulkanMaterial* blitMat;
 	VulkanMaterialInstance* blitMatInst;
 
+	VulkanObjModel* city;
 	VulkanObjModel* platform;
 	VulkanGltfModel* gltf;
 	VulkanTexture* brdf;
@@ -93,17 +100,18 @@ public:
 		blitMeshBuf = new VulkanMeshBuffer(context->device, vku::blit);
 
 		SceneInfo sInfo{};
+		sInfo.uniformAllocSizes.push_back(sizeof(CascadesUniform));
 		scene = new Scene(context->device, sInfo);
 
 		// load skybox texture
 		skybox = new VulkanTexture;
 		skybox->image = new VulkanImage(context->device, {
-			"res/cubemap/posx.jpg",
-			"res/cubemap/negx.jpg",
-			"res/cubemap/posy.jpg",
-			"res/cubemap/negy.jpg",
-			"res/cubemap/posz.jpg",
-			"res/cubemap/negz.jpg"
+			"res/textures/cubemap_night/posx.jpg",
+			"res/textures/cubemap_night/negx.jpg",
+			"res/textures/cubemap_night/posy.jpg",
+			"res/textures/cubemap_night/negy.jpg",
+			"res/textures/cubemap_night/posz.jpg",
+			"res/textures/cubemap_night/negz.jpg"
 			});
 		VulkanImageViewInfo viewInfo{};
 		skybox->image->writeImageViewInfo(&viewInfo);
@@ -133,7 +141,6 @@ public:
 						if (cascadeIndex <= 2) {
 							viewport.y = y * SHADOWMAP_CASCADE_SIZE;
 							vkCmdSetViewport(cb, 0, 1, &viewport);
-
 							vkCmdPushConstants(cb, mat->pipelineLayout, VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_VERTEX_BIT, sizeof(glm::mat4), sizeof(glm::uint), &cascadeIndex);
 							scene->render(cb, i, true);
 							cascadeIndex++;
@@ -143,9 +150,7 @@ public:
 				});
 
 			PassSchema* main = graphSchema->pass("main", [&](uint32_t i, const VkCommandBuffer& cb) {
-				using namespace csmdemostate;
-
-				if (currentFrustum != -1) {
+				if (enableDebugView) {
 					cascadeMatInst->material->bind(cb);
 					cascadeMatInst->bind(cb, i);
 
@@ -153,23 +158,20 @@ public:
 
 					visualizerMat->bind(cb);
 					visualizerMatInstance->bind(cb, i);
-					const glm::vec4 red(1.0, 0.0, 0.0, 0.5), blue(0.0, 1.0, 0.0, 0.3);
-					glm::mat4 frust;
-					if (currentFrustum == 0)
-						frust = global.cascade0;
-					else if (currentFrustum == 1)
-						frust = global.cascade1;
-					else
-						frust = global.cascade2;
-					frust = glm::inverse(frust);
+					const glm::vec4 red(1.0, 1.0, 1.0, 1.0f), blue(0.0, 1.0, 0.0, 0.3);
+					glm::mat4 frust = glm::inverse(cascades.cascades[currentFrustum]);
 					if (showViewFrust) {
 						vkCmdPushConstants(cb, visualizerMat->pipelineLayout, VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(glm::mat4), &testFrusta[currentFrustum]);
 						vkCmdPushConstants(cb, visualizerMat->pipelineLayout, VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_VERTEX_BIT, sizeof(glm::mat4), sizeof(glm::vec4), &red);
+						int mode = true;
+						vkCmdPushConstants(cb, visualizerMat->pipelineLayout, VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_VERTEX_BIT, sizeof(glm::mat4) + sizeof(glm::vec4), sizeof(int), &mode);
 						boxMeshBuf->draw(cb);
 					}
 					if (showCascFrust) {
 						vkCmdPushConstants(cb, visualizerMat->pipelineLayout, VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(glm::mat4), &frust);
 						vkCmdPushConstants(cb, visualizerMat->pipelineLayout, VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_VERTEX_BIT, sizeof(glm::mat4), sizeof(glm::vec4), &blue);
+						int mode = false;
+						vkCmdPushConstants(cb, visualizerMat->pipelineLayout, VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_VERTEX_BIT, sizeof(glm::mat4) + sizeof(glm::vec4), sizeof(int), &mode);
 						boxMeshBuf->draw(cb);
 					}
 				}
@@ -186,6 +188,8 @@ public:
 				blitMatInst->bind(cb, i);
 				blitMatInst->material->bind(cb);
 				blitMeshBuf->draw(cb);
+
+				guiInstance->Render(cb);
 				});
 
 			main->samples = msaaCount;
@@ -198,17 +202,21 @@ public:
 
 			AttachmentSchema* cascadeAtt = graphSchema->attachment("cascades", cascade0, { main, blit });
 			cascadeAtt->format = context->device->swapchain->depthFormat;
+			cascadeAtt->isDepth = true;
 			cascadeAtt->isSampled = true;
 			cascadeAtt->width = cascadeAtt->height = SHADOWMAP_CASCADE_SIZE * 2; // 2x2 grid of cascades. max 4.
 			VulkanSamplerInfo samplerCI{};
 			samplerCI.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
 			samplerCI.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-			samplerCI.minFilter = VK_FILTER_NEAREST;
-			samplerCI.magFilter = VK_FILTER_NEAREST;
+			samplerCI.minFilter = VK_FILTER_LINEAR;
+			samplerCI.magFilter = VK_FILTER_LINEAR;
+			samplerCI.compareEnable = VK_TRUE;
+			samplerCI.compareOp = VK_COMPARE_OP_LESS;
 			cascadeAtt->samplerInfo = samplerCI;
 
 			AttachmentSchema* depth = graphSchema->attachment("depth", main, {});
 			depth->format = context->device->swapchain->depthFormat;
+			depth->isDepth = true;
 			depth->samples = msaaCount;
 			depth->isTransient = true;
 
@@ -229,8 +237,8 @@ public:
 		irradiancemap = generateIrradianceCube(context->device, skybox);
 		specmap = generatePrefilteredCube(context->device, skybox);
 
-		std::vector<ShaderMacro> pbrMacros = { { "AMBIENT_FACTOR", "0.01" } };
-		VulkanObjModel* city = new VulkanObjModel("res/models/city.obj", scene, mainPass, specmap, irradiancemap, brdf, pbrMacros);
+		std::vector<ShaderMacro> pbrMacros = { { "AMBIENT_FACTOR", "0.3" }, {"USE_CASCADES", ""}, {"SUN_STRENGTH", "0.5" } };
+		city = new VulkanObjModel("res/models/city.obj", scene, mainPass, specmap, irradiancemap, brdf, pbrMacros);
 		city->localTransform *= glm::translate(glm::vec3(0, -2, 0));
 		scene->addObject(city);
 
@@ -239,6 +247,7 @@ public:
 		scene->addObject(platform);
 
 		gltf = new VulkanGltfModel("res/models/DamagedHelmet.glb", scene, mainPass, brdf, irradiancemap, specmap, pbrMacros);
+		gltf->localTransform *= glm::translate(glm::vec3(0.0f, 1.0f, 0.0f));
 		scene->addObject(gltf);
 
 		// skyboxes don't care about depth testing / writing
@@ -289,37 +298,32 @@ public:
 		for (uint32_t i = 0; i < cmdBufs.size(); i++) {
 			cmdBufs[i] = context->device->createCommandBuffer();
 		}
-		
-		glfwSetKeyCallback(context->windowHandle, [](GLFWwindow* window, int key, int scancode, int action, int mode) {
-			using namespace csmdemostate;
 
-			if (action == GLFW_PRESS) {
-				switch (key) {
-				case GLFW_KEY_C:
-					paused = !paused;
-					break;
-				case GLFW_KEY_V:
-					currentFrustum++;
-					if (currentFrustum >= 3) currentFrustum = -1;
-					break;
-				case GLFW_KEY_B:
-					showViewFrust = !showViewFrust;
-					break;
-				case GLFW_KEY_N:
-					showCascFrust = !showCascFrust;
-					break;
-				}
-			}
-			});
+		guiInstance = new VulkanImguiInstance(context, blitPass->pass);
 
 		buildSwapchainDependants();
-
-
 	}
 
 	SceneGlobalUniform global{};
+	CascadesUniform cascades{};
 	glm::mat4 testFrustum, testCascadeFrustum;
 	glm::mat4 testFrusta[3];
+	float lightZenith = 3.14f / 2.0f, lightAzimuth = 3.14 / 2.0f;
+	float slopeBias = 0.0000060000f, baseBias = 0.0000020000f;
+	bool keepCascadesSquare = true, roundCascadesToPixel = true;
+
+	bool frozen = false;
+	bool showViewFrust = false;
+	bool showCascFrust = false;
+	bool enableDebugView = false;
+	int currentFrustum = 0;
+
+	float n = .01f;
+	float f = 100.0f;
+	float split1 = 2.0f/100.0f, split2 = 15.0f/100.0f;
+
+	glm::mat4 camTransform;
+	float savedCamFOV;
 
 	void updateUniforms(uint32_t i) {
 		flycam->update();
@@ -331,10 +335,6 @@ public:
 		// camera numbers
 		VkExtent2D swapchainExtent = context->device->swapchain->swapChainExtent;
 		float width = static_cast<float>(swapchainExtent.width), height = static_cast<float>(swapchainExtent.height);
-		float n = .01f;
-		float f = 100.0f;
-		float half = 8.0f;
-		float quarter = 2.0f;
 
 		glm::mat4 transform = flycam->getTransform();
 		global.view = glm::inverse(transform);
@@ -343,23 +343,78 @@ public:
 		global.screenRes = { swapchainExtent.width, swapchainExtent.height };
 		global.time = time;
 
-		if (!csmdemostate::paused) {
-			global.directionalLight = glm::normalize(glm::rotate(glm::mat4(1.0), time, glm::vec3(0.0, 1.0, 0.0)) * glm::vec4(1.0, -1.0, 0.0, 0.0));
-			testFrusta[0] = transform * glm::inverse(flycam->getProjMatrix(width, height, n, quarter));
-			testFrusta[1] = transform * glm::inverse(flycam->getProjMatrix(width, height, quarter, half));
-			testFrusta[2] = transform * glm::inverse(flycam->getProjMatrix(width, height, half, f));
-			global.cascade0 = fitLightProjMatToCameraFrustum(testFrusta[0], global.directionalLight, SHADOWMAP_CASCADE_SIZE, 50);
-			global.cascade1 = fitLightProjMatToCameraFrustum(testFrusta[1], global.directionalLight, SHADOWMAP_CASCADE_SIZE, 50);
-			global.cascade2 = fitLightProjMatToCameraFrustum(testFrusta[2], global.directionalLight, SHADOWMAP_CASCADE_SIZE, 150);
+		glm::mat4 sceneAABB = scene->getAABBTransform();
+
+		global.directionalLight = glm::vec4(1.0, 0.0, 0.0, 0.0);
+		global.directionalLight = glm::rotate(glm::mat4(1.0f), -lightZenith, glm::vec3(0.0, 0.0, 1.0)) * global.directionalLight;
+		global.directionalLight = glm::rotate(glm::mat4(1.0f), lightAzimuth, glm::vec3(0.0, 1.0, 0.0)) * global.directionalLight;
+
+		if (!frozen) {
+			camTransform = transform;
+			savedCamFOV = flycam->getFOV();
 		}
 
-		scene->updateUniforms(i, &global);
+		float quarter = n + (f - n) * split1;
+		float half = n + (f - n) * split2;
+
+		testFrusta[0] = camTransform * glm::inverse(flycam->getProjMatrix(width, height, n, quarter, savedCamFOV));
+		testFrusta[1] = camTransform * glm::inverse(flycam->getProjMatrix(width, height, quarter, half, savedCamFOV));
+		testFrusta[2] = camTransform * glm::inverse(flycam->getProjMatrix(width, height, half, f, savedCamFOV));
+
+		float size;
+		cascades.cascades[0] = fitLightProjMatToCameraFrustum(testFrusta[0], global.directionalLight, SHADOWMAP_CASCADE_SIZE, sceneAABB, &size, keepCascadesSquare, roundCascadesToPixel);
+		cascades.data[0][1] = slopeBias * size;
+		cascades.data[0][0] = baseBias * size;
+		cascades.cascades[1] = fitLightProjMatToCameraFrustum(testFrusta[1], global.directionalLight, SHADOWMAP_CASCADE_SIZE, sceneAABB, &size, keepCascadesSquare, roundCascadesToPixel);
+		cascades.data[1][1] = slopeBias * size;
+		cascades.data[1][0] = baseBias * size;
+		cascades.cascades[2] = fitLightProjMatToCameraFrustum(testFrusta[2], global.directionalLight, SHADOWMAP_CASCADE_SIZE, sceneAABB, &size, keepCascadesSquare, roundCascadesToPixel);
+		cascades.data[2][1] = slopeBias * size;
+		cascades.data[2][0] = baseBias * size;
+
+		scene->updateUniforms(i, 0, &global);
+		scene->updateUniforms(i, 1, &cascades);
 	}
 
 	int timesDrawn = 0;
 	VkCommandBuffer draw(uint32_t i)
 	{
 		updateUniforms(i);
+
+		guiInstance->NextFrame();
+		ImGui::Begin("CSM Demo");
+		ImGui::Checkbox("Freeze View Frustum", &frozen);
+		ImGui::SliderFloat("Light Zenith", &lightZenith, 0.0f, 3.14f);
+		ImGui::SliderFloat("Light Azimuth", &lightAzimuth, 0.0f, 6.28f);
+
+		ImGui::NewLine();
+		
+		ImGui::Text("Cascade Options", "");
+		ImGui::InputFloat("Near Plane", &n, 0, 0, "%.10f");
+		ImGui::InputFloat("Far Plane", &f, 0, 0, "%.10f");
+		ImGui::SliderFloat("Cascade Split #1", &split1, 0.0f, 1.0f, "%.10f");
+		ImGui::SliderFloat("Cascade Split #2", &split2, 0.0f, 1.0f, "%.10f");
+		split2 = std::max(split2, split1);
+		ImGui::InputFloat("Base Bias Factor", &baseBias, 0, 0, "%.10f");
+		ImGui::InputFloat("Slope Bias Factor", &slopeBias, 0, 0, "%.10f");
+
+		ImGui::NewLine();
+
+		ImGui::Text("Cascade Options", "");
+		ImGui::Checkbox("Keep Cascades Square", &keepCascadesSquare);
+		ImGui::Checkbox("Round Cascades to Pixel Size", &roundCascadesToPixel);
+
+		ImGui::NewLine();
+
+		ImGui::Text("Frustum/Cascade Debugging", "");
+		ImGui::Checkbox("Enable Debug View", &enableDebugView);
+		ImGui::Checkbox("Show Cascade Frustum", &showCascFrust);
+		ImGui::Checkbox("Show View Frustum", &showViewFrust);
+		if (!frozen)
+			showViewFrust = false;
+		ImGui::SliderInt("Frustum Index", &currentFrustum, 0, 2);
+		ImGui::End();
+		guiInstance->InternalRender();
 
 		if (timesDrawn >= cmdBufs.size())
 			vkResetCommandBuffer(cmdBufs[i], 0);
@@ -381,6 +436,8 @@ public:
 	}
 	void preCleanup()
 	{
+		delete guiInstance;
+
 		destroySwapchainDependents();
 
 		delete skybox;

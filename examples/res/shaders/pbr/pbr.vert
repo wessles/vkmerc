@@ -2,9 +2,6 @@
 #extension GL_ARB_separate_shader_objects : enable
 
 layout(std140, binding = 0) uniform GlobalUniform {
-	mat4 cascade0;
-	mat4 cascade1;
-	mat4 cascade2;
 	mat4 view;
 	mat4 proj;
 	vec4 camPos;
@@ -12,6 +9,11 @@ layout(std140, binding = 0) uniform GlobalUniform {
 	vec2 screenRes;
 	float time;
 } global;
+
+layout(std140, binding = 1) uniform CascadesUniform {
+	mat4 cascades[4];
+	float biases[4];
+} cascades;
 
 layout(push_constant) uniform pushConstants {
     mat4 transform;

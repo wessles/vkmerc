@@ -68,6 +68,10 @@ namespace vku {
 		samplerInfo.minFilter = info.minFilter;
 		samplerInfo.magFilter = info.magFilter;
 		samplerInfo.borderColor = info.borderColor;
+		samplerInfo.compareEnable = info.compareEnable;
+		samplerInfo.compareOp = info.compareOp;
+		samplerInfo.minLod = info.minLod;
+		samplerInfo.maxLod = info.maxLod;
 
 		if (vkCreateSampler(*device, &samplerInfo, nullptr, &handle) != VK_SUCCESS) {
 			throw std::runtime_error("Failed to create sampler!");

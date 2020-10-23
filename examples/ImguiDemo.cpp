@@ -1,7 +1,8 @@
 #include <iostream>
 #include <filesystem>
 
-#define VK_ENABLE_BETA_EXTENSIONS
+#include <imgui/imgui.h>
+#include <imgui/VulkanImguiInstance.hpp>
 
 #include <VulkanContext.h>
 #include <VulkanDevice.h>
@@ -38,8 +39,7 @@ using namespace vku;
 class Engine : public BaseEngine {
 public:
 	Engine() {
-		this->windowTitle = "KHR_rt Demo";
-		this->debugEnabled = false;
+		this->windowTitle = "ImGui Demo";
 		this->width = 900;
 		this->height = 900;
 	}
@@ -50,6 +50,13 @@ public:
 	RenderGraphSchema* graphSchema;
 	RenderGraph* graph;
 	Pass* mainPass;
+	Pass* blitPass;
+
+	VulkanImguiInstance* guiInstance;
+
+	VulkanMeshBuffer* blitMeshBuf;
+	VulkanMaterial* blitMat;
+	VulkanMaterialInstance* blitMatInst;
 
 	VulkanGltfModel* gltf;
 	VulkanTexture* brdf;
@@ -67,6 +74,7 @@ public:
 	void postInit()
 	{
 		boxMeshBuf = new VulkanMeshBuffer(context->device, vku::box);
+		blitMeshBuf = new VulkanMeshBuffer(context->device, vku::blit);
 
 		SceneInfo sInfo{};
 		scene = new Scene(context->device, sInfo);
@@ -74,12 +82,12 @@ public:
 		// load skybox texture
 		skybox = new VulkanTexture;
 		skybox->image = new VulkanImage(context->device, {
-			"res/cubemap/posx.jpg",
-			"res/cubemap/negx.jpg",
-			"res/cubemap/posy.jpg",
-			"res/cubemap/negy.jpg",
-			"res/cubemap/posz.jpg",
-			"res/cubemap/negz.jpg"
+			"res/textures/cubemap_day/posx.jpg",
+			"res/textures/cubemap_day/negx.jpg",
+			"res/textures/cubemap_day/posy.jpg",
+			"res/textures/cubemap_day/negy.jpg",
+			"res/textures/cubemap_day/posz.jpg",
+			"res/textures/cubemap_day/negz.jpg"
 			});
 		VulkanImageViewInfo viewInfo{};
 		skybox->image->writeImageViewInfo(&viewInfo);
@@ -100,24 +108,39 @@ public:
 
 				scene->render(cb, i, false);
 				});
+
+			PassSchema* blit = graphSchema->pass("blit", [&](uint32_t i, const VkCommandBuffer& cb) {
+				blitMatInst->bind(cb, i);
+				blitMatInst->material->bind(cb);
+				blitMeshBuf->draw(cb);
+
+				guiInstance->Render(cb);
+				});
+
 			main->samples = msaaCount;
 
-			AttachmentSchema* edge = graphSchema->attachment("color", main, {});
+			AttachmentSchema* edge = graphSchema->attachment("color", main, { blit });
 			edge->format = context->device->swapchain->screenFormat;
+			edge->isSampled = true;
 			edge->samples = msaaCount;
-			edge->isSwapchain = true;
 			edge->resolve = true;
 
 			AttachmentSchema* depth = graphSchema->attachment("depth", main, {});
 			depth->format = context->device->swapchain->depthFormat;
 			depth->samples = msaaCount;
 			depth->isTransient = true;
+			depth->isDepth = true;
+
+			AttachmentSchema* swap = graphSchema->attachment("swap", blit, {});
+			swap->format = context->device->swapchain->screenFormat;
+			swap->isSwapchain = true;
 		}
 
 		graph = new RenderGraph(graphSchema, scene, context->device->swapchain->swapChainLength);
 		graph->createLayouts();
 
 		mainPass = graph->getPass("main");
+		blitPass = graph->getPass("blit");
 
 		brdf = generateBRDFLUT(context->device);
 		irradiancemap = generateIrradianceCube(context->device, skybox);
@@ -136,51 +159,20 @@ public:
 		matInst = new VulkanMaterialInstance(mat);
 		for (VulkanDescriptorSet* set : matInst->descriptorSets) { set->write(0, skybox); }
 
+		VulkanMaterialInfo blitMatInfo(context->device);
+		blitMatInfo.shaderStages.push_back({ "res/shaders/blit/blit.frag", VK_SHADER_STAGE_FRAGMENT_BIT, {} });
+		blitMatInfo.shaderStages.push_back({ "res/shaders/blit/blit.vert", VK_SHADER_STAGE_VERTEX_BIT, {} });
+		blitMat = new VulkanMaterial(&blitMatInfo, scene, blitPass);
+		blitMatInst = new VulkanMaterialInstance(blitMat);
+
+		cmdBufs.resize(context->device->swapchain->swapChainLength);
+		for (uint32_t i = 0; i < cmdBufs.size(); i++) {
+			cmdBufs[i] = context->device->createCommandBuffer();
+		}
+
+		guiInstance = new VulkanImguiInstance(context, blitPass->pass);
+
 		buildSwapchainDependants();
-
-		createAccelerationStructure();
-	}
-
-	void createAccelerationStructure(VulkanMeshBuffer* meshBuf) {
-
-		VkAccelerationStructureCreateGeometryTypeInfoKHR geomType{};
-		geomType.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_GEOMETRY_TYPE_INFO_KHR;
-		geomType.indexType = VK_INDEX_TYPE_UINT32;
-		geomType.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT;
-		geomType.geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR;
-		geomType.maxPrimitiveCount = 1000;
-		geomType.maxVertexCount = 1000;
-		geomType.allowsTransforms = VK_FALSE;
-
-		VkDeviceOrHostAddressConstKHR vertexAddress, indicesAddress;
-		VkBufferDeviceAddressInfo addrInfo{};
-		addrInfo.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
-		addrInfo.buffer = meshBuf->vBuffer;
-		vertexAddress.deviceAddress = vkGetBufferDeviceAddress(context->device->handle, &addrInfo);
-		addrInfo.buffer = meshBuf->iBuffer;
-		indicesAddress.deviceAddress = vkGetBufferDeviceAddress(context->device->handle, &addrInfo);
-
-		VkAccelerationStructureGeometryTrianglesDataKHR triangles;
-		triangles.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR;
-		triangles.vertexFormat = geomType.vertexFormat;
-		triangles.vertexData = vertexAddress;
-		triangles.vertexStride = sizeof(Vertex);
-		triangles.indexType = geomType.indexType;
-		triangles.indexData = indicesAddress;
-		triangles.transformData = {};
-
-		VkAccelerationStructureGeometryKHR asGeom{};
-		asGeom.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR
-		VkAccelerationStructureKHR accelStructure;
-
-		VkAccelerationStructureCreateInfoKHR accelCI{};
-		accelCI.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR;
-		accelCI.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
-
-		accelCI.pGeometryInfos = nullptr;
-
-
-		vkCreateAccelerationStructureKHR(context->device->handle, &accelCI, nullptr, &accelStructure);
 	}
 
 	glm::mat4 cascade = glm::mat4(1.0f);
@@ -194,8 +186,6 @@ public:
 
 		float n = 0.01f;
 		float f = 5.0f;
-		float half = (n + f) / 2.0f;
-		float quarter = (n + half) / 2.0f;
 
 		SceneGlobalUniform global{};
 		glm::mat4 transform = flycam->getTransform();
@@ -207,26 +197,32 @@ public:
 		global.time = time;
 		global.directionalLight = glm::rotate(glm::mat4(1.0), time, glm::vec3(0.0, 1.0, 0.0)) * glm::vec4(1.0, -1.0, 0.0, 0.0);
 
-		scene->updateUniforms(i, &global);
+		scene->updateUniforms(i, 0, &global);
 	}
 
+	int timesDrawn = 0;
 	VkCommandBuffer draw(uint32_t i)
 	{
 		updateUniforms(i);
 
+		guiInstance->NextFrame();
+		ImGui::ShowDemoWindow();
+		guiInstance->InternalRender();
+
+		if (timesDrawn >= cmdBufs.size())
+			vkResetCommandBuffer(cmdBufs[i], 0);
+		else
+			timesDrawn++;
+		cmdBufs[i] = context->device->beginCommandBuffer();
+		graph->render(cmdBufs[i], i);
+		vkEndCommandBuffer(cmdBufs[i]);
+
 		return cmdBufs[i];
 	}
+
 	void buildSwapchainDependants()
 	{
 		graph->createInstances();
-
-		vkFreeCommandBuffers(*context->device, context->device->commandPool, static_cast<uint32_t>(cmdBufs.size()), cmdBufs.data());
-		cmdBufs.resize(context->device->swapchain->swapChainLength);
-		for (uint32_t i = 0; i < cmdBufs.size(); i++) {
-			cmdBufs[i] = context->device->beginCommandBuffer();
-			graph->render(cmdBufs[i], i);
-			vkEndCommandBuffer(cmdBufs[i]);
-		}
 	}
 	void destroySwapchainDependents()
 	{
@@ -234,12 +230,18 @@ public:
 	}
 	void preCleanup()
 	{
+		delete guiInstance;
+
 		destroySwapchainDependents();
 
 		delete skybox;
 		delete boxMeshBuf;
 		delete matInst;
 		delete mat;
+
+		delete blitMatInst;
+		delete blitMat;
+		delete blitMeshBuf;
 
 		delete flycam;
 

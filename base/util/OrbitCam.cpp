@@ -91,8 +91,10 @@ glm::mat4 OrbitCam::getTransform()
 	return glm::translate(glm::mat4(1.0f), cam) * rotmat;
 }
 
-glm::mat4 OrbitCam::getProjMatrix(float width, float height, float zMin, float zMax)
+glm::mat4 OrbitCam::getProjMatrix(float width, float height, float zMin, float zMax, float FOV)
 {
+	if (FOV < 0)
+		FOV = this->FOV;
 	glm::mat4 proj = glm::perspective(glm::radians(FOV), width / height, zMin, zMax);
 	proj[1][1] *= -1;
 	return proj;

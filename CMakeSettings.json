@@ -1,4 +1,10 @@
 ﻿{
+  // These environment variables apply to all configurations.
+  "environments": [
+    {
+      "VK_INSTANCE_LAYERS": "VK_LAYER_LUNARG_monitor"
+    }
+  ],
   "configurations": [
     {
       "name": "x64-Debug",

@@ -39,6 +39,10 @@ namespace vku {
 		VkFormat format;
 		VkSampleCountFlagBits samples = VK_SAMPLE_COUNT_1_BIT;
 
+		bool clearOnLoad = true;
+		VkClearColorValue clearColor = {1.0f, 0.0f, 1.0f, 1.0f};
+		VkClearDepthStencilValue clearDepthStencil = { 1.0f, 0 };
+
 		// if so, no image will be created for this attachment, and the corresponding swapchain will be assumed as its image
 		bool isSwapchain = false;
 
@@ -49,6 +53,8 @@ namespace vku {
 		bool isInputAttachment = false;
 
 		bool isSampled = false;
+
+		bool isDepth = false;
 
 		// resolve MSAA to single sample IF this is the swapchain
 		bool resolve = false;

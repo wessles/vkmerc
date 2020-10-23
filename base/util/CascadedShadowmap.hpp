@@ -6,27 +6,26 @@
 #include <glm/gtx/transform.hpp>
 
 namespace vku {
-	glm::mat4 fitLightProjMatToCameraFrustum(glm::mat4 frustumMat, glm::vec4 lightDirection, float dim, float size) {
+	glm::mat4 fitLightProjMatToCameraFrustum(glm::mat4 frustumMat, glm::vec4 lightDirection, float dim, glm::mat4 sceneAABB, float* worldSpaceDim, bool square = false, bool roundToPixelSize = false) {
 		// multiply by inverse projection*view matrix to find frustum vertices in world space
 		// transform to light space
 		// same pass, find minimum along each axis
 		glm::mat4 lightSpaceTransform = glm::lookAt(glm::vec3(0.0f, 0.0f, 0.0f), -glm::vec3(lightDirection), glm::vec3(0.0f, 1.0f, 0.0f));
 
 		bool firstProcessed = false;
-		glm::vec3 boundingA{ 0.0f, 0.0f, 0.0f };
-		glm::vec3 boundingB{ 0.0f, 0.0f, 0.0f };
-
+		glm::vec3 boundingA(std::numeric_limits<float>::infinity());
+		glm::vec3 boundingB(-std::numeric_limits<float>::infinity());
 
 		// start with <-1 -1 0> to <1 1 1> cube
 		// notice we use z:[0, 1] clip space, unlike openGL's z:[-1, 1]
 		std::vector<glm::vec4> boundingVertices = {
-			{-1.0f,	-1.0f,	0.0f,	1.0f},
+			{-1.0f,	-1.0f,	-1.0f,	1.0f},
 			{-1.0f,	-1.0f,	1.0f,	1.0f},
-			{-1.0f,	1.0f,	0.0f,	1.0f},
+			{-1.0f,	1.0f,	-1.0f,	1.0f},
 			{-1.0f,	1.0f,	1.0f,	1.0f},
-			{1.0f,	-1.0f,	0.0f,	1.0f},
+			{1.0f,	-1.0f,	-1.0f,	1.0f},
 			{1.0f,	-1.0f,	1.0f,	1.0f},
-			{1.0f,	1.0f,	0.0f,	1.0f},
+			{1.0f,	1.0f,	-1.0f,	1.0f},
 			{1.0f,	1.0f,	1.0f,	1.0f}
 		};
 		for (glm::vec4& vert : boundingVertices) {
@@ -56,6 +55,17 @@ namespace vku {
 			boundingB.z = std::max(vert.z, boundingB.z);
 		}
 
+		// fit z bounding to scene AABB
+		for (uint32_t i = 0; i < 2; i++) {
+			for (uint32_t j = 0; j < 2; j++) {
+				for (uint32_t k = 0; k < 2; k++) {
+					glm::vec3 vert = glm::vec3(lightSpaceTransform * sceneAABB * glm::vec4(i, j, k, 1));
+					boundingA.z = std::min(vert.z, boundingA.z);
+					boundingB.z = std::max(vert.z, boundingB.z);
+				}
+			}
+		}
+
 		// from https://en.wikipedia.org/wiki/Orthographic_projection#Geometry
 		// because I don't trust GLM
 		float l = boundingA.x;
@@ -65,28 +75,36 @@ namespace vku {
 		float n = boundingA.z;
 		float f = boundingB.z;
 
-		// TODO: accomodate scene geometry bounding box hierarchy
-		n = -size/2.0f;
-		f = -n;
+		float constantSize = std::max(r - l, t - b);
+		// uncomment this to keep constant world-size resolution, side length = diagonal of largest face of frustum
+		// the other option looks good at high resolutions, but can result in shimmering as you look in different directions and the cascade changes size
+		// float constantSize = glm::length(glm::vec3(boundingVertices[7]) - glm::vec3(boundingVertices[0])) * 2.0;
 
-		// keep constant world-size square, side length = diagonal of largest face of frustum
-		float constantSize = glm::length(glm::vec3(boundingVertices[7]) - glm::vec3(boundingVertices[0])) * 2.0;
+		*worldSpaceDim = constantSize;
 
 		// make it square, with side length of max(r-l,t-b)
-		float W = r - l, H = t - b;
-		float diff = constantSize - H;
-		t += diff / 2.0f;
-		b -= diff / 2.0f;
-		diff = constantSize - W;
-		r += diff / 2.0f;
-		l -= diff / 2.0f;
+		if (square) {
+			float W = r - l, H = t - b;
+			float diff = constantSize - H;
+			if (diff > 0) {
+				t += diff / 2.0f;
+				b -= diff / 2.0f;
+			}
+			diff = constantSize - W;
+			if (diff > 0) {
+				r += diff / 2.0f;
+				l -= diff / 2.0f;
+			}
+		}
 
 		// avoid shimmering
-		float pixelSize = constantSize / dim;
-		l = std::round(l / pixelSize) * pixelSize;
-		r = std::round(r / pixelSize) * pixelSize;
-		b = std::round(b / pixelSize) * pixelSize;
-		t = std::round(t / pixelSize) * pixelSize;
+		if (roundToPixelSize) {
+			float pixelSize = constantSize / dim;
+			l = std::round(l / pixelSize) * pixelSize;
+			r = std::round(r / pixelSize) * pixelSize;
+			b = std::round(b / pixelSize) * pixelSize;
+			t = std::round(t / pixelSize) * pixelSize;
+		}
 
 		glm::mat4 ortho = {
 			2.0f / (r - l),	0.0f,			0.0f,			0.0f,

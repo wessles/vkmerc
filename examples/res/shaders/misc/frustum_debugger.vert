@@ -2,9 +2,6 @@
 #extension GL_ARB_separate_shader_objects : enable
 
 layout(std140, binding = 0) uniform GlobalUniform {
-	mat4 cascade0;
-	mat4 cascade1;
-	mat4 cascade2;
 	mat4 view;
 	mat4 proj;
 	vec4 camPos;
@@ -27,12 +24,9 @@ layout(location = 0) out vec3 fragPosition;
 
 void main() {
 	vec4 vertPos = vec4(inPosition, 1.0);
-	// create vulkan-style clip space from -1,-1,0 to 1,1,1
-	//vertPos.z = (vertPos.z + 1.0f) / 2.0f;
+    fragPosition = vertPos.xyz;
 	vertPos = pc.transform * vertPos;
 	vertPos /= vertPos.w;
-
-    fragPosition = vertPos.xyz;
 	
-    gl_Position = global.proj * global.view * vec4(fragPosition, 1.0);
+    gl_Position = global.proj * global.view * vertPos;
 }
