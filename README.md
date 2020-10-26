@@ -97,15 +97,14 @@ I plan on  implementing a system in which flexible per-object data is stored in 
 
 This system may sound similar to Dynamic buffers, but I am not going with those, as they have significant CPU overhead I would like to avoid.
 
-## Methodology
-
-**Tools:** 
+## Tools
 - I used **RenderDoc** extensively for debugging this engine. I also used it to analyze other games for inspiration. For example, I used RenderDoc to learn about shadow-map cascades as used in *Risk of Rain 2*, and created a very similar implementation.
 - I used the built-in **Visual Studio profiler** to analyze the CPU-intensive parts of my program
 
-**References:**
+## References
 - I read [*Realtime Rendering (4th Edition)*](https://www.amazon.com/Real-Time-Rendering-Fourth-Tomas-Akenine-M%C3%B6ller/dp/1138627003) cover to cover, which taught me a lot about modern real-time rendering techniques, and made this project a whole lot easier. It's an excellent book that I still reference often. I can't recommend it enough.
 - I also read Lengyel's [*Foundations of Game Engine Development (Volume 1)*](https://www.amazon.com/Foundations-Game-Engine-Development-Mathematics/dp/0985811749/), which gave me a solid understanding of the math behind rendering and games.
+- [*C++ Primer 5th Edition*](https://www.amazon.com/Primer-5th-Stanley-B-Lippman/dp/0321714113) is how I re-acquainted myself with C++ after a long break from the language.
 - I reference the [Vulkan specification](https://www.khronos.org/registry/vulkan/specs/) regularly to debug, and to improve the engine.
 - I use [gpuinfo.org](http://gpuinfo.org/) to learn about memory limits and hardware support for Vulkan features.
 - I learned a lot about Vulkan from [vulkan-tutorial.com](https://vulkan-tutorial.com/), and from the many helpful people on the official Vulkan Discord server.
