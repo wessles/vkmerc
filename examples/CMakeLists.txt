@@ -14,7 +14,7 @@ endfunction()
 
 # list all demos here
 demo("CascadedShadowmapDemo")
-demo("MultisampleBlitDemo")
+demo("BloomDemo")
 demo("HelmetDemo")
 demo("ImguiDemo")
 demo("EmptyDemo")

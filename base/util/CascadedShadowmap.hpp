@@ -6,7 +6,7 @@
 #include <glm/gtx/transform.hpp>
 
 namespace vku {
-	glm::mat4 fitLightProjMatToCameraFrustum(glm::mat4 frustumMat, glm::vec4 lightDirection, float dim, glm::mat4 sceneAABB, float* worldSpaceDim, bool square = false, bool roundToPixelSize = false, bool useConstantSize = false) {
+	glm::mat4 fitLightProjMatToCameraFrustum(glm::mat4 frustumMat, glm::vec4 lightDirection, float dim, glm::mat4 sceneAABB, float* worldSpaceDim, float* worldSpaceDepth, bool square = false, bool roundToPixelSize = false, bool useConstantSize = false) {
 		// multiply by inverse projection*view matrix to find frustum vertices in world space
 		// transform to light space
 		// same pass, find minimum along each axis
@@ -74,14 +74,20 @@ namespace vku {
 		float n = boundingA.z;
 		float f = boundingB.z;
 
-		float actualSize = std::max(r - l, t - b);
+		float actualSize;
 		if (useConstantSize) {
 			// keep constant world-size resolution, side length = diagonal of largest face of frustum
 			// the other option looks good at high resolutions, but can result in shimmering as you look in different directions and the cascade changes size
-			 actualSize = glm::length(glm::vec3(boundingVertices[7]) - glm::vec3(boundingVertices[1]));
+			float farFaceDiagonal = glm::length(glm::vec3(boundingVertices[7]) - glm::vec3(boundingVertices[1]));
+			float forwardDiagonal = glm::length(glm::vec3(boundingVertices[7]) - glm::vec3(boundingVertices[0]));
+			actualSize = std::max(farFaceDiagonal, forwardDiagonal);
+		}
+		else {
+			actualSize = std::max(r - l, t - b);
 		}
 
 		*worldSpaceDim = actualSize;
+		*worldSpaceDepth = f - n;
 
 		// make it square
 		if (square) {

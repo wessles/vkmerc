@@ -10,12 +10,19 @@ layout(std140, binding = 0) uniform GlobalUniform {
 	float time;
 } global;
 
+layout(set = 2, binding = 0) uniform MergeParams {
+	float intensity;
+} params;
+
 layout(set = 1, binding = 0) uniform sampler2D screen;
+layout(set = 1, binding = 1) uniform sampler2D bloom;
 
 layout(location = 0) in vec2 uv;
 
 layout(location = 0) out vec4 outColor;
 
+
 void main() {
-	outColor = texture(screen, uv);
+	outColor = vec4( texture(screen,uv).rgb + texture(bloom,uv).rgb * params.intensity , 1.0);
+	//outColor = vec4( mix(texture(screen,uv).rgb, texture(bloom,uv).rgb, params.intensity) , 1.0);
 }

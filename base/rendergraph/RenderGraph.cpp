@@ -9,6 +9,8 @@
 #include "VulkanSwapchain.h"
 #include "VulkanDescriptorSet.h"
 #include "VulkanTexture.h"
+#include <VulkanMaterial.h>
+#include <VulkanMesh.h>
 
 namespace vku {
 	RenderGraphSchema::RenderGraphSchema() {}
@@ -21,6 +23,14 @@ namespace vku {
 	PassSchema* RenderGraphSchema::pass(const std::string& name, std::function<void(const uint32_t, const VkCommandBuffer&)> commands) {
 		PassSchema* node = new PassSchema(name);
 		node->commands = commands;
+		nodes.push_back(node);
+		return node;
+	}
+	PassSchema* RenderGraphSchema::blitPass(const std::string& name, const std::string& shader, std::function<void(const uint32_t, const VkCommandBuffer&)> commands) {
+		PassSchema* node = new PassSchema(name);
+		node->commands = commands;
+		node->isBlitPass = true;
+		node->blitPassShader = shader;
 		nodes.push_back(node);
 		return node;
 	}
@@ -101,6 +111,14 @@ namespace vku {
 	}
 
 	void RenderGraph::createLayouts() {
+		// generate blit mesh buffer if there is a blit pass
+		for (Pass* pass : nodes) {
+			if (pass->schema->isBlitPass) {
+				this->blitMesh = new VulkanMeshBuffer(this->device, vku::blit);
+				break;
+			}
+		}
+
 		// generate singular resources for nodes (renderpass, descriptor set layout) as opposed to the duplicated resources we make later (descriptor set, framebuffer)
 		for (Pass* passNode : nodes) {
 
@@ -325,10 +343,23 @@ namespace vku {
 					throw std::runtime_error("Failed to create pipeline layout for material!");
 				}
 			}
+			// generate one material automatically, if it's a blitPass
+			if (schema.isBlitPass) {
+				VulkanMaterialInfo matInfo(device);
+				matInfo.shaderStages.push_back({ "res/shaders/blit/blit.vert", VK_SHADER_STAGE_VERTEX_BIT, {} });
+				matInfo.shaderStages.push_back({ schema.blitPassShader, VK_SHADER_STAGE_FRAGMENT_BIT, {} });
+				passNode->blitPassMaterial = new VulkanMaterial(&matInfo, scene, passNode);
+				passNode->blitPassMaterialInstance = new VulkanMaterialInstance(passNode->blitPassMaterial);
+			}
 		}
 	}
 	void RenderGraph::destroyLayouts() {
+		delete blitMesh;
 		for (Pass* node : nodes) {
+			if (node->schema->isBlitPass) {
+				delete node->blitPassMaterialInstance;
+				delete node->blitPassMaterial;
+			}
 			vkDestroyPipelineLayout(*device, node->pipelineLayout, nullptr);
 			delete node->inputLayout;
 			vkDestroyRenderPass(*device, node->pass, nullptr);
@@ -589,7 +620,14 @@ namespace vku {
 
 			vkCmdBeginRenderPass(cmdbuf, &passBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
 			{
-				node->schema->commands(i, cmdbuf);
+				if (node->schema->isBlitPass) {
+					node->blitPassMaterial->bind(cmdbuf);
+					node->blitPassMaterialInstance->bind(cmdbuf, i);
+					blitMesh->draw(cmdbuf);
+				}
+				if (node->schema->commands != nullptr) {
+					node->schema->commands(i, cmdbuf);
+				}
 			}
 			vkCmdEndRenderPass(cmdbuf);
 		}

@@ -6,7 +6,7 @@
 
 #include <vulkan/vulkan.h>
 
-#include "../VulkanTexture.h"
+#include "VulkanTexture.h"
 
 namespace vku {
 
@@ -25,6 +25,9 @@ namespace vku {
 
 		std::function<void(const uint32_t, const VkCommandBuffer&)> commands;
 		
+		bool isBlitPass = false;
+		std::string blitPassShader;
+
 		PassSchema(const std::string name) {
 			this->name = name;
 		}
@@ -77,6 +80,7 @@ namespace vku {
 		~RenderGraphSchema();
 
 		PassSchema* pass(const std::string& name, std::function<void(const uint32_t, const VkCommandBuffer&)> commands);
+		PassSchema* blitPass(const std::string& name, const std::string& shader, std::function<void(const uint32_t, const VkCommandBuffer&)> commands = nullptr);
 		AttachmentSchema* attachment(const std::string& name, PassSchema* from, std::vector<PassSchema*> to);
 	};
 
@@ -88,6 +92,9 @@ namespace vku {
 	struct VulkanTexture;
 	struct VulkanDescriptorSet;
 	struct VulkanDescriptorSetLayout;
+	struct VulkanMeshBuffer;
+	struct VulkanMaterial;
+	struct VulkanMaterialInstance;
 
 	struct PassInstance {
 		VulkanDescriptorSet* descriptorSet;
@@ -107,6 +114,10 @@ namespace vku {
 
 		// this will be set during the createInstances function, based on outgoing edge dimensions (which must be equal)
 		uint32_t width, height;
+
+		// this only exists if schema.isBlitPass
+		VulkanMaterial* blitPassMaterial = nullptr;
+		VulkanMaterialInstance* blitPassMaterialInstance = nullptr;
 
 		const PassSchema* schema;
 
@@ -143,6 +154,8 @@ namespace vku {
 		uint32_t numInstances;
 
 	public:
+		VulkanMeshBuffer *blitMesh;
+
 		RenderGraph(RenderGraphSchema* schema, Scene* scene, uint32_t numInstances);
 		~RenderGraph();
 

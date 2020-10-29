@@ -17,7 +17,7 @@ layout(std140, binding = 1) uniform CascadesUniform {
 } cascades;
 #endif
 
-layout(set=1, binding=0) uniform sampler2DShadow cascade;
+layout(set=1, binding=0) uniform sampler2D cascade;
 
 layout(set=2, binding=0, std140) uniform PbrUniform {
 	vec4 albedo;
@@ -100,16 +100,20 @@ vec2 transformToCascadeQuadrant(vec2 p, int i) {
 float exposureToSun() {
 	vec4 cascadeProj;
 	float bias, slopeBias;
+	float scale;
+	vec2 startUV;
 
 	bool foundMatch = false;
 
-	for(int i = 0; i < 3; i++) {
+	for(int i = 0; i < 4; i++) {
 		cascadeProj = cascades.cascades[i] * vec4(inPosition, 1.0);
 		
 		if(cascadeProj.x > -1.0 && cascadeProj.y > -1.0 && cascadeProj.x < 1.0 && cascadeProj.y < 1.0) {
 			cascadeProj.xy = transformToCascadeQuadrant(cascadeProj.xy, i);
+			startUV = transformToCascadeQuadrant(vec2(-1.0), i);
 			bias = cascades.data[i][0];
 			slopeBias = cascades.data[i][1];
+			scale = cascades.data[i][2];
 			foundMatch = true;
 			break;
 		}
@@ -121,7 +125,31 @@ float exposureToSun() {
 	float NoL = max(0.0, dot(-inNormal, global.directionalLight.xyz));
 	float totalBias = bias + slopeBias * tan(acos(NoL));
 
-	return texture(cascade, cascadeProj.xyz - vec3(0., 0., totalBias));
+	float exposure = 0.0;
+
+	float blockerDepth = texture(cascade, cascadeProj.xy).r;
+	
+	float kernelScale = scale;
+
+	const int samples = 4;
+	const int totalSamples = samples * samples;
+	const float padding = 0.1;
+	for(int i = -samples; i <= samples; i++) {
+		for(int j = -samples; j <= samples; j++) {
+			vec2 uv = cascadeProj.xy + vec2(i * kernelScale, j * kernelScale);
+			
+			if(uv.x < startUV.x + padding) uv.x = (startUV.x + startUV.x) - uv.x;
+			else if(uv.x > startUV.x + 0.5 - padding) startUV.x + startUV.x + 1.0 - uv.x;
+
+			if(uv.y < startUV.y + padding) uv.y = (startUV.y + startUV.y) - uv.y;
+			else if(uv.y > startUV.y + 0.5 - padding) startUV.y + startUV.y + 1.0 - uv.y;
+
+			blockerDepth = texture(cascade, uv).r;
+			exposure += float((cascadeProj.z - blockerDepth) < totalBias + i*j*slopeBias) / totalSamples;
+		}
+	}
+
+	return exposure;
 }
 #else
 float exposureToSun() { return 1.0; }

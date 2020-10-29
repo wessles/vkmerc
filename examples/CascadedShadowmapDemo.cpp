@@ -52,8 +52,8 @@ public:
 	Engine() {
 		this->windowTitle = "Cascaded Shadowmap Demo";
 		//this->fullscreen = true;
-		this->width = 900;
-		this->height = 900;
+		this->width = 1280;
+		this->height = 720;
 	}
 
 	FlyCam* flycam;
@@ -138,7 +138,7 @@ public:
 				for (int x = 0; x <= 1; x++) {
 					viewport.x = x * SHADOWMAP_CASCADE_SIZE;
 					for (int y = 0; y <= 1; y++) {
-						if (cascadeIndex <= 2) {
+						if (cascadeIndex <= 3) {
 							viewport.y = y * SHADOWMAP_CASCADE_SIZE;
 							vkCmdSetViewport(cb, 0, 1, &viewport);
 							vkCmdPushConstants(cb, mat->pipelineLayout, VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_VERTEX_BIT, sizeof(glm::mat4), sizeof(glm::uint), &cascadeIndex);
@@ -206,10 +206,10 @@ public:
 			cascadeAtt->isSampled = true;
 			cascadeAtt->width = cascadeAtt->height = SHADOWMAP_CASCADE_SIZE * 2; // 2x2 grid of cascades. max 4.
 			VulkanSamplerInfo samplerCI{};
-			samplerCI.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-			samplerCI.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-			samplerCI.minFilter = VK_FILTER_LINEAR;
-			samplerCI.magFilter = VK_FILTER_LINEAR;
+			samplerCI.addressModeU = VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT;
+			samplerCI.addressModeV = VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT;
+			samplerCI.minFilter = VK_FILTER_NEAREST;
+			samplerCI.magFilter = VK_FILTER_NEAREST;
 			samplerCI.compareEnable = VK_TRUE;
 			samplerCI.compareOp = VK_COMPARE_OP_LESS;
 			cascadeAtt->samplerInfo = samplerCI;
@@ -307,10 +307,11 @@ public:
 	SceneGlobalUniform global{};
 	CascadesUniform cascades{};
 	glm::mat4 testFrustum, testCascadeFrustum;
-	glm::mat4 testFrusta[3];
+	glm::mat4 testFrusta[4];
 	float lightZenith = 3.14f / 2.0f, lightAzimuth = 3.14 / 2.0f;
 	float slopeBias = 0.0000060000f, baseBias = 0.0000020000f;
 	bool keepCascadesSquare = true, roundCascadesToPixel = true;
+	float kernel = 0.001f;
 
 	bool frozen = false;
 	bool showViewFrust = false;
@@ -322,7 +323,7 @@ public:
 
 	float n = .01f;
 	float f = 100.0f;
-	float split1 = 2.0f/100.0f, split2 = 15.0f/100.0f;
+	float split1 = 2.0f / 100.0f, split2 = 15.0f / 100.0f, split3 = 50.0f / 100.0f;
 
 	glm::mat4 camTransform;
 	float savedCamFOV;
@@ -358,21 +359,20 @@ public:
 
 		float quarter = n + (f - n) * split1;
 		float half = n + (f - n) * split2;
+		float latter = n + (f - n) * split3;
 
 		testFrusta[0] = camTransform * glm::inverse(flycam->getProjMatrix(width, height, n, quarter, savedCamFOV));
 		testFrusta[1] = camTransform * glm::inverse(flycam->getProjMatrix(width, height, quarter, half, savedCamFOV));
-		testFrusta[2] = camTransform * glm::inverse(flycam->getProjMatrix(width, height, half, f, savedCamFOV));
+		testFrusta[2] = camTransform * glm::inverse(flycam->getProjMatrix(width, height, half, latter, savedCamFOV));
+		testFrusta[3] = camTransform * glm::inverse(flycam->getProjMatrix(width, height, latter, f, savedCamFOV));
 
-		float size;
-		cascades.cascades[0] = fitLightProjMatToCameraFrustum(testFrusta[0], global.directionalLight, SHADOWMAP_CASCADE_SIZE, sceneAABB, &size, keepCascadesSquare, roundCascadesToPixel, useConstantSize);
-		cascades.data[0][1] = slopeBias * size;
-		cascades.data[0][0] = baseBias * size;
-		cascades.cascades[1] = fitLightProjMatToCameraFrustum(testFrusta[1], global.directionalLight, SHADOWMAP_CASCADE_SIZE, sceneAABB, &size, keepCascadesSquare, roundCascadesToPixel, useConstantSize);
-		cascades.data[1][1] = slopeBias * size;
-		cascades.data[1][0] = baseBias * size;
-		cascades.cascades[2] = fitLightProjMatToCameraFrustum(testFrusta[2], global.directionalLight, SHADOWMAP_CASCADE_SIZE, sceneAABB, &size, keepCascadesSquare, roundCascadesToPixel, useConstantSize);
-		cascades.data[2][1] = slopeBias * size;
-		cascades.data[2][0] = baseBias * size;
+		float size, depthSize;
+		for (int i = 0; i < 4; i++) {
+			cascades.cascades[i] = fitLightProjMatToCameraFrustum(testFrusta[i], global.directionalLight, SHADOWMAP_CASCADE_SIZE, sceneAABB, &size, &depthSize, keepCascadesSquare, roundCascadesToPixel, useConstantSize);
+			cascades.data[i][0] = baseBias * size;
+			cascades.data[i][1] = slopeBias * size;
+			cascades.data[i][2] = kernel / size;
+		}
 
 		scene->updateUniforms(i, 0, &global);
 		scene->updateUniforms(i, 1, &cascades);
@@ -390,15 +390,18 @@ public:
 		ImGui::SliderFloat("Light Azimuth", &lightAzimuth, 0.0f, 6.28f);
 
 		ImGui::NewLine();
-		
+
 		ImGui::Text("Cascade Options", "");
 		ImGui::InputFloat("Near Plane", &n, 0, 0, "%.10f");
 		ImGui::InputFloat("Far Plane", &f, 0, 0, "%.10f");
 		ImGui::SliderFloat("Cascade Split #1", &split1, 0.0f, 1.0f, "%.10f");
 		ImGui::SliderFloat("Cascade Split #2", &split2, 0.0f, 1.0f, "%.10f");
+		ImGui::SliderFloat("Cascade Split #3", &split3, 0.0f, 1.0f, "%.10f");
 		split2 = std::max(split2, split1);
+		split3 = std::max(split3, split2);
 		ImGui::InputFloat("Base Bias Factor", &baseBias, 0, 0, "%.10f");
 		ImGui::InputFloat("Slope Bias Factor", &slopeBias, 0, 0, "%.10f");
+		ImGui::SliderFloat("Filter Kernel Size", &kernel, 0, 0.05f, "%.10f");
 
 		ImGui::NewLine();
 
