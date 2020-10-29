@@ -16,11 +16,14 @@ This is a `C++20`  / `Vulkan 1.2` renderer. This has been my primary personal pr
 ✅ .OBJ Model / .MTL Material Loading  
 ✅ Cascaded Shadow-maps  
 ✅ `Imgui` for in-demo user interfaces  
+✅ Bloom Post-processing effect  
 
 **Soon**  
-⬜ Temporal Antialiasing  
-⬜ Bloom Post-processing  
+⬜ SSAO / HBAO  
+⬜ Deferred Rendering  
+⬜ HDR  
 ⬜ Poisson Filtering of Shadowmaps  
+⬜ Temporal Antialiasing  
 
 **Later**  
 ⬜ Switch from push-constant transforms to SSBO for per-object data  
