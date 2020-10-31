@@ -1,3 +1,4 @@
+
 # 🖖 `vkmerc`
 
 ![The Cascaded Shadowmapping Demo](https://i.imgur.com/RyeCnPB.png)
@@ -8,15 +9,15 @@ This is a `C++20`  / `Vulkan 1.2` renderer. This has been my primary personal pr
 
 **Completed**  
 ✅ Render Graph  
+✅ 2 tier shader-caching with hot-reloading support  
 ✅ Material System w/ Shader Reflection using SPIRV-Cross  
-✅ Cached shader-variant compilation system  
 ✅ Physically Based Rendering  
 ✅ Cubemap filtering suite for IBL  
 ✅ GLTF 2.0 Model Loading  
 ✅ .OBJ Model / .MTL Material Loading  
 ✅ Cascaded Shadow-maps  
-✅ `Imgui` for in-demo user interfaces  
 ✅ Bloom Post-processing effect  
+✅ `Imgui` for in-demo user interfaces  
 
 **Soon**  
 ⬜ SSAO / HBAO  
@@ -68,17 +69,35 @@ Materials are an abstraction for `VkPipeline`. I bundle the extremely verbose `V
 
 I use SPIRV-Cross to get reflection data on shaders that I compile. This way I can use descriptors in shaders without tediously maintaining a Descriptor Set Layout in my code.
 
-### Shader Caching
-I've implemented a basic shader cache system. When a shader is requested by the engine, a hash-code is generated from the tuple (filename, macros). We then check if a file called `filename.{hash}.spv` exists. If it does not, we compile the shader with the given set of macros, and save it to this file. If it does exist, then we simply return the SPIR-V data in the `.spv` file.
+### Shader Caching / Hot Reloading
+I've created a **2-tier shader cache**, which supports **hot-reloading**.
 
-In the future, I would like to extend this cache to include a runtime cache of shaders, so that we are not re-importing the same cached shader variant multiple times. This will aid in debugging, as I can edit just one instance of a shader in RenderDoc and see the results for all instances of this shader immediately.
+To load a shader, all you need to do is query `VulkanDevice.ShaderCache.get(ShaderVariant)`, where `ShaderVariant` is a combination of the shader filename, and a list of macros.
+
+![](https://i.imgur.com/lMUM5pc.png)
+
+If you want to enable hot-reloading, just `VulkanDevice.ShaderCache.hotReloadCheck()` right before recording the frame's command buffer. This is done automatically by default, so long as `BaseEngine.shaderHotReloadEnabled`. Pro-tip: avoid enabling this in production, it's filesystem heavy.
+
+![](https://i.imgur.com/U2daOUT.png)
+
+#### `#include` macros
+
+`#include` is fully supported by the shader caching system. In fact, the cache invalidation algorithm takes dependencies into account. This means that, if you `#include "cascades.glsl"` in `blit.frag`, and you change `cascades.glsl`, then `blit.frag` will be recompiled automatically. 
+
+#### `.spv` filenames
+
+Different variants of the same shader have different compilation targets. For example, if we had a shader variant for `blit.frag` with macro `FUNKY_COLORS` set to `true`, the compiled spv file would be `blit.frag.fec34a2511.spv`. If we changed the macros at all, we would get a different hash.
+
+#### Future
+
+I'm very happy with how the system turned out. It's been incredibly useful and fault-tolerant so far. The only weakness is that I do not account for changes to descriptor sets very gracefully. I could also make a few optimizations: reduce unnecessary file reads, decrease polling frequency, put the wait-heavy cache-validation stage on a separate thread, etc. For now, the overhead is negligible enough that I can ignore these issues.
 
 ### Physically Based Rendering
 My physically based rendering shaders are found in `pbr.frag` and `pbr.vert`. The approach is quite standard: it has an albedo, roughness, metallic and emissive layer. I use a GGX normal distribution, Smith geometry function and a Schlick Fresnel approximation. The details are largely drawn from the PBR chapter of *Realtime Rendering 4e*, and [learnopengl.com](https://learnopengl.com/PBR/Theory).
 
 I generate the UE4 BRDF lookup table and the image-based lighting (irradiance / specular) cube-maps at runtime, as seen in `base/pbr/`. I took a lot of inspiration from [Sascha Willem's GLTF Vulkan example](https://github.com/SaschaWillems/Vulkan). This is also where I got a lot of information on importing GLTF files for Vulkan.
 
-The results of this system are visually appealing, but I would like to refactor this code in the future, once I have revamped my shader-caching system.
+The results of this system are visually appealing, but I would like to refactor this code in the future.
 
 ### Cascaded Shadowmaps
 [My implementation of cascaded shadowmaps is explained intuitively in this video.](https://www.youtube.com/watch?v=u0pk1LyLKYQ)
