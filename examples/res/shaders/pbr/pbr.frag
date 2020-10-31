@@ -10,15 +10,6 @@ layout(std140, binding = 0) uniform GlobalUniform {
 	float time;
 } global;
 
-#ifdef USE_CASCADES
-layout(std140, binding = 1) uniform CascadesUniform {
-	mat4 cascades[4];
-	vec4 data[4];
-} cascades;
-#endif
-
-layout(set=1, binding=0) uniform sampler2DShadow cascade;
-
 layout(set=2, binding=0) uniform sampler2D tex_albedo;
 layout(set=2, binding=1) uniform sampler2D tex_normal;
 layout(set=2, binding=2) uniform sampler2D tex_metal_rough;
@@ -33,8 +24,13 @@ layout(location = 1) in vec3 inColor;
 layout(location = 2) in vec2 inTexCoord;
 layout(location = 3) in vec3 inNormal;
 layout(location = 4) in vec4 inTangent;
+layout(location = 5) in float inDepth;
 
 layout(location = 0) out vec4 outColor;
+
+#ifdef USE_CASCADES
+#include "cascade.glsl"
+#endif
 
 const float PI = 3.14159265359;
 
@@ -84,45 +80,8 @@ vec3 fresnelSchlickRoughness(float cosTheta, vec3 F0, float roughness)
 }
 
 #ifdef USE_CASCADES
-vec2 transformToCascadeQuadrant(vec2 p, int i) {
-	p = (p+1.0)/4.0;
-	vec2 o = vec2(0.0);
-	// {0, 1, 2, 3} --> {0, 0.5, 0, 0.5}
-	o.y = float(i % 2) / 2.0;
-	// {0, 1, 2, 3} --> {0, 0, 0.5, 0.5}
-	o.x = floor(float(i) / 2.0) / 2.0;
-	return o+p;
-}
-
-// query the shadowmap cascades. 0 = shadow, 1 = lit
-float exposureToSun() {
-	vec4 cascadeProj;
-	float bias, slopeBias;
-
-	bool foundMatch = false;
-
-	for(int i = 0; i < 3; i++) {
-		cascadeProj = cascades.cascades[i] * vec4(inPosition, 1.0);
-		
-		if(cascadeProj.x > -1.0 && cascadeProj.y > -1.0 && cascadeProj.x < 1.0 && cascadeProj.y < 1.0) {
-			cascadeProj.xy = transformToCascadeQuadrant(cascadeProj.xy, i);
-			bias = cascades.data[i][0];
-			slopeBias = cascades.data[i][1];
-			foundMatch = true;
-			break;
-		}
-	}
-
-	if(!foundMatch) return 1.0;
-
-	// slope scale biasing
-	float NoL = max(0.0, dot(-inNormal, global.directionalLight.xyz));
-	float totalBias = bias + slopeBias * tan(acos(NoL));
-
-	return texture(cascade, cascadeProj.xyz - vec3(0., 0., totalBias));
-}
 #else
-float exposureToSun() { return 1.0; }
+float exposureToSun(vec3 position, float z) { return 1.0; }
 #endif
 
 // cook-torrance BRDF
@@ -144,7 +103,7 @@ vec3 reflectance(vec3 c, vec3 p, vec3 n, vec3 wo, float m, float r, vec3 F0) {
 #ifdef SUN_STRENGTH
 	sun *= SUN_STRENGTH;
 #endif
-	sun *= exposureToSun();
+	sun *= exposureToSun(inPosition, inDepth);
 	return sun;
 }
 
@@ -168,7 +127,7 @@ void main()
 
 	vec3 N = getNormal();
 	vec3 V = normalize(global.camPos.xyz - inPosition);
-    vec3 R = reflect(-V, N); 
+    vec3 R = reflect(-V, N);
 
 	// calculate reflectance at normal incidence; if dia-electric (like plastic) use F0 
     // of 0.04 and if it's a metal, use the albedo color as F0 (metallic workflow)    

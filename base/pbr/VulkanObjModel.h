@@ -17,7 +17,7 @@ namespace vku {
 		TexturelessPbrMaterial* mat;
 
 		glm::mat4 aabb;
-		VulkanObjModel(const std::string& filename, Scene* scene, Pass* pass, VulkanTexture* specular_ibl, VulkanTexture* diffuse_ibl, VulkanTexture* brdf_lut, std::vector<ShaderMacro> macros = {});
+		VulkanObjModel(const std::string& filename, Scene* scene, Pass* pass, VulkanTexture* specular_ibl, VulkanTexture* diffuse_ibl, VulkanTexture* brdf_lut, std::map<std::string, std::string> macros = {});
 		~VulkanObjModel();
 		virtual void render(VkCommandBuffer cmdBuf, uint32_t swapIdx, bool noMaterial) override;
 		virtual glm::mat4 getAABBTransform() override;

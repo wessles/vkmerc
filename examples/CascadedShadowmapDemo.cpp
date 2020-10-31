@@ -45,6 +45,8 @@ struct CascadesUniform {
 		{0.0f, 0.00037f, 0, 0},
 		{}
 	};
+	glm::mat4 camFrust;
+	glm::vec2 clipPlanes;
 };
 
 class Engine : public BaseEngine {
@@ -237,7 +239,7 @@ public:
 		irradiancemap = generateIrradianceCube(context->device, skybox);
 		specmap = generatePrefilteredCube(context->device, skybox);
 
-		std::vector<ShaderMacro> pbrMacros = { { "AMBIENT_FACTOR", "0.3" }, {"USE_CASCADES", ""}, {"SUN_STRENGTH", "0.5" } };
+		std::map<std::string,std::string> pbrMacros = { { "AMBIENT_FACTOR", "0.3" }, {"USE_CASCADES", ""}, {"SUN_STRENGTH", "0.5" } };
 		city = new VulkanObjModel("res/models/city.obj", scene, mainPass, specmap, irradiancemap, brdf, pbrMacros);
 		city->localTransform *= glm::translate(glm::vec3(0, -2, 0));
 		scene->addObject(city);
@@ -255,23 +257,23 @@ public:
 		matInfo.depthStencil.depthWriteEnable = false;
 		matInfo.depthStencil.depthTestEnable = false;
 		matInfo.rasterizer.frontFace = VK_FRONT_FACE_CLOCKWISE;
-		matInfo.shaderStages.push_back({ "res/shaders/skybox/skybox.frag", VK_SHADER_STAGE_FRAGMENT_BIT, {} });
-		matInfo.shaderStages.push_back({ "res/shaders/skybox/skybox.vert", VK_SHADER_STAGE_VERTEX_BIT, {} });
+		matInfo.shaderStages.push_back({ "skybox/skybox.frag", {} });
+		matInfo.shaderStages.push_back({ "skybox/skybox.vert", {} });
 		mat = new VulkanMaterial(&matInfo, scene, mainPass);
 		matInst = new VulkanMaterialInstance(mat);
 		for (VulkanDescriptorSet* set : matInst->descriptorSets) { set->write(0, skybox); }
 
 		// blit pass
 		VulkanMaterialInfo blitMatInfo(context->device);
-		blitMatInfo.shaderStages.push_back({ "res/shaders/misc/shadowpass_debug_blit.frag", VK_SHADER_STAGE_FRAGMENT_BIT, {} });
-		blitMatInfo.shaderStages.push_back({ "res/shaders/blit/blit.vert", VK_SHADER_STAGE_VERTEX_BIT, {} });
+		blitMatInfo.shaderStages.push_back({ "misc/shadowpass_debug_blit.frag", {} });
+		blitMatInfo.shaderStages.push_back({ "blit/blit.vert", {} });
 		blitMat = new VulkanMaterial(&blitMatInfo, scene, blitPass);
 		blitMatInst = new VulkanMaterialInstance(blitMat);
 
 		// shadowpass material
 		VulkanMaterialInfo shadowMatInfo(context->device);
 		shadowMatInfo.depthStencil.depthTestEnable = true;
-		shadowMatInfo.shaderStages.push_back({ "res/shaders/shadowpass/shadowpass.vert", VK_SHADER_STAGE_VERTEX_BIT, {} });
+		shadowMatInfo.shaderStages.push_back({ "shadowpass/shadowpass.vert", {} });
 		shadowpassMat = new VulkanMaterial(&shadowMatInfo, scene, shadowmapPass);
 		shadowpassMatInst = new VulkanMaterialInstance(shadowpassMat);
 
@@ -282,15 +284,15 @@ public:
 		visualizerMatInfo.colorBlendAttachment.alphaBlendOp = VK_BLEND_OP_ADD;
 		visualizerMatInfo.colorBlendAttachment.colorBlendOp = VK_BLEND_OP_ADD;
 		visualizerMatInfo.rasterizer.cullMode = VK_CULL_MODE_NONE;
-		visualizerMatInfo.shaderStages.push_back({ "res/shaders/misc/frustum_debugger.frag", VK_SHADER_STAGE_FRAGMENT_BIT, {} });
-		visualizerMatInfo.shaderStages.push_back({ "res/shaders/misc/frustum_debugger.vert", VK_SHADER_STAGE_VERTEX_BIT, {} });
+		visualizerMatInfo.shaderStages.push_back({ "misc/frustum_debugger.frag", {} });
+		visualizerMatInfo.shaderStages.push_back({ "misc/frustum_debugger.vert", {} });
 		visualizerMat = new VulkanMaterial(&visualizerMatInfo, scene, mainPass);
 		visualizerMatInstance = new VulkanMaterialInstance(visualizerMat);
 
 		// visualize where cascades start and end
 		VulkanMaterialInfo cascadeDebugMatInfo(context->device);
-		cascadeDebugMatInfo.shaderStages.push_back({ "res/shaders/misc/cascade_debugger.frag", VK_SHADER_STAGE_FRAGMENT_BIT, {} });
-		cascadeDebugMatInfo.shaderStages.push_back({ "res/shaders/pbr/pbr.vert", VK_SHADER_STAGE_VERTEX_BIT, {} });
+		cascadeDebugMatInfo.shaderStages.push_back({ "misc/cascade_debugger.frag", {} });
+		cascadeDebugMatInfo.shaderStages.push_back({ "pbr/pbr.vert", {} });
 		cascadeMat = new VulkanMaterial(&cascadeDebugMatInfo, scene, mainPass);
 		cascadeMatInst = new VulkanMaterialInstance(cascadeMat);
 
@@ -323,7 +325,7 @@ public:
 
 	float n = .01f;
 	float f = 100.0f;
-	float split1 = 2.0f / 100.0f, split2 = 15.0f / 100.0f, split3 = 50.0f / 100.0f;
+	float split1 = 2.0f / 100.0f, split2 = 8.0f / 100.0f, split3 = 32.0f / 100.0f;
 
 	glm::mat4 camTransform;
 	float savedCamFOV;
@@ -355,11 +357,20 @@ public:
 		if (!frozen) {
 			camTransform = transform;
 			savedCamFOV = flycam->getFOV();
+			cascades.camFrust = global.proj * global.view;
 		}
 
 		float quarter = n + (f - n) * split1;
 		float half = n + (f - n) * split2;
 		float latter = n + (f - n) * split3;
+
+		cascades.data[0][3] = split1;
+		cascades.data[1][3] = split2;
+		cascades.data[2][3] = split3;
+		cascades.data[3][3] = 1.0f;
+
+		cascades.clipPlanes[0] = n;
+		cascades.clipPlanes[1] = f;
 
 		testFrusta[0] = camTransform * glm::inverse(flycam->getProjMatrix(width, height, n, quarter, savedCamFOV));
 		testFrusta[1] = camTransform * glm::inverse(flycam->getProjMatrix(width, height, quarter, half, savedCamFOV));

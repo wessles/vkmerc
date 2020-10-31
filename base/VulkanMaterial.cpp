@@ -12,7 +12,8 @@
 #include "VulkanDevice.h"
 #include "VulkanSwapchain.h"
 #include "VulkanDescriptorSet.h"
-#include "VulkanShader.h"
+#include "shader/ShaderModule.h"
+#include "shader/ShaderVariant.h"
 #include "VulkanTexture.h"
 #include "VulkanMesh.h"
 
@@ -30,8 +31,6 @@ namespace vku {
 		vertexInput.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
 		vertexInput.vertexBindingDescriptionCount = 1;
 		vertexInput.vertexAttributeDescriptionCount = static_cast<uint32_t>(vertexAttributeDescriptions.size());
-		vertexInput.pVertexBindingDescriptions = &vertexBindingDescription; // Optional
-		vertexInput.pVertexAttributeDescriptions = vertexAttributeDescriptions.data(); // Optional
 
 		viewport.x = 0.0f;
 		viewport.y = 0.0f;
@@ -44,9 +43,7 @@ namespace vku {
 		scissor.extent = swapchainExtent;
 		viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
 		viewportState.viewportCount = 1;
-		viewportState.pViewports = &viewport;
 		viewportState.scissorCount = 1;
-		viewportState.pScissors = &scissor;
 
 		colorBlendAttachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
 		colorBlendAttachment.blendEnable = VK_TRUE;
@@ -61,7 +58,6 @@ namespace vku {
 		colorBlending.logicOpEnable = VK_FALSE;
 		colorBlending.logicOp = VK_LOGIC_OP_COPY; // Optional
 		colorBlending.attachmentCount = 1;
-		colorBlending.pAttachments = &colorBlendAttachment;
 		colorBlending.blendConstants[0] = 0.0f; // Optional
 		colorBlending.blendConstants[1] = 0.0f; // Optional
 		colorBlending.blendConstants[2] = 0.0f; // Optional
@@ -104,21 +100,10 @@ namespace vku {
 		tesselation.patchControlPoints = 3;
 
 		dynamicState.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
-		dynamicState.dynamicStateCount = static_cast<uint32_t>(dynamicStateList.size());
-		dynamicState.pDynamicStates = dynamicStateList.data();
 
 		pipeline.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
 		pipeline.pNext = nullptr;
 		pipeline.flags = 0;
-		pipeline.pVertexInputState = &vertexInput;
-		pipeline.pInputAssemblyState = &inputAssembly;
-		pipeline.pViewportState = &viewportState;
-		pipeline.pRasterizationState = &rasterizer;
-		pipeline.pMultisampleState = &multisampling;
-		pipeline.pColorBlendState = &colorBlending;
-		pipeline.pDepthStencilState = &depthStencil;
-		pipeline.pTessellationState = &tesselation;
-		pipeline.pDynamicState = &dynamicState;
 
 		pipeline.basePipelineHandle = VK_NULL_HANDLE; // Optional
 		pipeline.basePipelineIndex = -1; // Optional
@@ -128,33 +113,69 @@ namespace vku {
 		maxPushConst.offset = 0;
 		maxPushConst.size = 128;
 		pushConstRanges.push_back(maxPushConst);
+
+		linkPointers();
+	}
+
+	void VulkanMaterialInfo::linkPointers() {
+		vertexInput.pVertexAttributeDescriptions = vertexAttributeDescriptions.data(); // Optional
+		vertexInput.pVertexBindingDescriptions = &vertexBindingDescription; // Optional
+		viewportState.pViewports = &viewport;
+		viewportState.pScissors = &scissor;
+		colorBlending.pAttachments = &colorBlendAttachment;
+		dynamicState.dynamicStateCount = static_cast<uint32_t>(dynamicStateList.size());
+		dynamicState.pDynamicStates = dynamicStateList.data();
+
+		pipeline.pVertexInputState = &vertexInput;
+		pipeline.pInputAssemblyState = &inputAssembly;
+		pipeline.pViewportState = &viewportState;
+		pipeline.pRasterizationState = &rasterizer;
+		pipeline.pMultisampleState = &multisampling;
+		pipeline.pColorBlendState = &colorBlending;
+		pipeline.pDepthStencilState = &depthStencil;
+		pipeline.pTessellationState = &tesselation;
+		pipeline.pDynamicState = &dynamicState;
 	}
 
 	VulkanMaterial::VulkanMaterial(VulkanMaterialInfo* const matInfo, Scene* const scene, Pass* const pass) {
 		this->scene = scene;
+		this->pass = pass;
 
+		this->info = new VulkanMaterialInfo(*matInfo);
+		this->info->linkPointers();
+
+		init();
+	}
+
+	void VulkanMaterial::rebuild() {
+		destroy();
+		init();
+	}
+
+	void VulkanMaterial::init() {
 		std::vector<VkPipelineShaderStageCreateInfo> shaderStages;
-		std::vector<VulkanShader*> shaderModules;
+		std::vector<ShaderModule*> shaderModules;
 		std::vector<DescriptorLayout> reflDescriptors;
 
-		matInfo->pipeline.subpass = 0;
-		matInfo->pipeline.renderPass = pass->pass;
-		matInfo->multisampling.rasterizationSamples = pass->schema->samples;
+		info->pipeline.subpass = 0;
+		info->pipeline.renderPass = pass->pass;
+		info->multisampling.rasterizationSamples = pass->schema->samples;
 
 		// load shaders into the pipeline state, and analyze shader for expected descriptors
-		for (const ShaderInfo& info : matInfo->shaderStages) {
-			std::vector<uint32_t> fileData = lazyLoadSpirv(info.filename, info.macros);
-
+		for (const ShaderVariant& info : info->shaderStages) {
 			// now compile the actual shader
-			VulkanShader* sModule = new VulkanShader(scene->device, fileData);
-			VkPipelineShaderStageCreateInfo stage = sModule->getShaderStage(info.stage);
+			ShaderModule* sModule = this->scene->device->shaderCache->get(info);
+			sModule->registerHotReloadCallback({ [this]() { 
+				rebuild(); 
+			}, (size_t) this });
+			VkPipelineShaderStageCreateInfo stage = sModule->getStageInfo();
 			shaderModules.push_back(sModule);
 			shaderStages.push_back(stage);
 
 			// use reflection to enumerate the inputs of this shader
 			{
 				// convert from char vector to uint32_t vector, then reflect
-				std::vector<uint32_t> spv(fileData.cbegin(), fileData.cend());
+				std::vector<uint32_t> spv = sModule->spirvData;
 				spirv_cross::CompilerGLSL glsl(std::move(spv));
 				spirv_cross::ShaderResources resources = glsl.get_shader_resources();
 
@@ -180,8 +201,8 @@ namespace vku {
 				}
 			}
 		}
-		matInfo->pipeline.stageCount = static_cast<uint32_t>(shaderStages.size());
-		matInfo->pipeline.pStages = shaderStages.data();
+		info->pipeline.stageCount = static_cast<uint32_t>(shaderStages.size());
+		info->pipeline.pStages = shaderStages.data();
 
 		// create descriptor layout (expand later)
 		descriptorSetLayout = new VulkanDescriptorSetLayout(scene->device, reflDescriptors);
@@ -197,20 +218,22 @@ namespace vku {
 		pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
 		pipelineLayoutInfo.setLayoutCount = static_cast<uint32_t>(dSetLayouts.size());
 		pipelineLayoutInfo.pSetLayouts = dSetLayouts.data();
-		pipelineLayoutInfo.pushConstantRangeCount = static_cast<uint32_t>(matInfo->pushConstRanges.size());
-		pipelineLayoutInfo.pPushConstantRanges = matInfo->pushConstRanges.data();
+		pipelineLayoutInfo.pushConstantRangeCount = static_cast<uint32_t>(info->pushConstRanges.size());
+		pipelineLayoutInfo.pPushConstantRanges = info->pushConstRanges.data();
 
 		VkResult result = vkCreatePipelineLayout(*scene->device, &pipelineLayoutInfo, nullptr, &pipelineLayout);
 		if (result != VK_SUCCESS) {
 			throw std::runtime_error("Failed to create pipeline layout for material!");
 		}
 
-		matInfo->pipeline.layout = pipelineLayout;
-		vkCreateGraphicsPipelines(*scene->device, VK_NULL_HANDLE, 1, &matInfo->pipeline, nullptr, &pipeline);
+		info->pipeline.layout = pipelineLayout;
+		vkCreateGraphicsPipelines(*scene->device, VK_NULL_HANDLE, 1, &info->pipeline, nullptr, &pipeline);
+	}
 
-		for (auto& sMod : shaderModules) {
-			delete sMod;
-		}
+	void VulkanMaterial::destroy() {
+		vkDestroyDescriptorSetLayout(*scene->device, *descriptorSetLayout, nullptr);
+		vkDestroyPipelineLayout(*scene->device, pipelineLayout, nullptr);
+		vkDestroyPipeline(*scene->device, pipeline, nullptr);
 	}
 
 	void VulkanMaterial::bind(VkCommandBuffer cb) {
@@ -218,9 +241,7 @@ namespace vku {
 	}
 
 	VulkanMaterial::~VulkanMaterial() {
-		vkDestroyDescriptorSetLayout(*scene->device, *descriptorSetLayout, nullptr);
-		vkDestroyPipelineLayout(*scene->device, pipelineLayout, nullptr);
-		vkDestroyPipeline(*scene->device, pipeline, nullptr);
+		destroy();
 	}
 
 

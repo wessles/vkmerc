@@ -33,11 +33,12 @@ namespace vku {
 		}
 
 	protected:
-		std::string windowTitle = "Untitled";
+		std::string windowTitle = "vkmerc";
 		bool fullscreen = false;
 		double framerateLimit = 120.0;
 		uint32_t width = 800, height = 600;
 		bool debugEnabled = true;
+		bool shaderHotReloadEnabled = true;
 
 	private:
 		// this flag will be tripped on the window-resize event
@@ -100,6 +101,9 @@ namespace vku {
 
 
 				glfwPollEvents();
+
+				if(shaderHotReloadEnabled)
+					context->device->shaderCache->hotReloadCheck();
 
 				VulkanSwapchain& swapchain = *context->device->swapchain;
 				{

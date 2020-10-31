@@ -154,7 +154,7 @@ namespace vku {
 		uint32_t numInstances;
 
 	public:
-		VulkanMeshBuffer *blitMesh;
+		VulkanMeshBuffer *blitMesh = nullptr;
 
 		RenderGraph(RenderGraphSchema* schema, Scene* scene, uint32_t numInstances);
 		~RenderGraph();

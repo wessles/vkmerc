@@ -9,6 +9,7 @@
 #include <VulkanMesh.h>
 #include <VulkanMaterial.h>
 #include <VulkanUniform.h>
+#include <shader/ShaderVariant.h>
 
 #include <util/CascadedShadowmap.hpp>
 
@@ -117,8 +118,8 @@ public:
 		matInfo.depthStencil.depthWriteEnable = false;
 		matInfo.depthStencil.depthTestEnable = false;
 		matInfo.rasterizer.frontFace = VK_FRONT_FACE_CLOCKWISE;
-		matInfo.shaderStages.push_back({ "res/shaders/skybox/skybox.frag", VK_SHADER_STAGE_FRAGMENT_BIT, {} });
-		matInfo.shaderStages.push_back({ "res/shaders/skybox/skybox.vert", VK_SHADER_STAGE_VERTEX_BIT, {} });
+		matInfo.shaderStages.push_back({ "skybox/skybox.frag", {} });
+		matInfo.shaderStages.push_back({ "skybox/skybox.vert", {} });
 		mat = new VulkanMaterial(&matInfo, scene, mainPass);
 		matInst = new VulkanMaterialInstance(mat);
 		for (VulkanDescriptorSet* set : matInst->descriptorSets) { set->write(0, skybox); }

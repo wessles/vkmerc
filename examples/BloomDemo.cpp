@@ -9,6 +9,7 @@
 #include <VulkanMesh.h>
 #include <VulkanMaterial.h>
 #include <VulkanUniform.h>
+#include <shader/ShaderCache.h>
 
 #include <util/CascadedShadowmap.hpp>
 
@@ -77,9 +78,21 @@ public:
 
 	VulkanUniform *blurXUniform, *blurYUniform, *highpassUniform, *mergePassUniform;
 
+
+
+	void test() {
+		ShaderCache shaderCache(context->device);
+		shaderCache.get("pbr/pbr.frag");
+	}
+
+
+
+
 	// Inherited via BaseEngine
 	void postInit()
 	{
+		test();
+
 		boxMeshBuf = new VulkanMeshBuffer(context->device, vku::box);
 
 		SceneInfo sInfo{};
@@ -116,10 +129,10 @@ public:
 				scene->render(cb, i, false);
 				});
 
-			PassSchema* downscale = graphSchema->blitPass("highpass", "res/shaders/bloom/highpass.frag");
-			PassSchema* blurX = graphSchema->blitPass("blur_x", "res/shaders/bloom/blur.frag");
-			PassSchema* blurY = graphSchema->blitPass("blur_y", "res/shaders/bloom/blur.frag");
-			PassSchema* blit = graphSchema->blitPass("blit", "res/shaders/bloom/merge.frag", [&](uint32_t i, const VkCommandBuffer& cb) {
+			PassSchema* downscale = graphSchema->blitPass("highpass", "bloom/highpass.frag");
+			PassSchema* blurX = graphSchema->blitPass("blur_x", "bloom/blur.frag");
+			PassSchema* blurY = graphSchema->blitPass("blur_y", "bloom/blur.frag");
+			PassSchema* blit = graphSchema->blitPass("blit", "bloom/merge.frag", [&](uint32_t i, const VkCommandBuffer& cb) {
 				gui->Render(cb);
 				});
 
@@ -200,8 +213,8 @@ public:
 		matInfo.depthStencil.depthWriteEnable = false;
 		matInfo.depthStencil.depthTestEnable = false;
 		matInfo.rasterizer.frontFace = VK_FRONT_FACE_CLOCKWISE;
-		matInfo.shaderStages.push_back({ "res/shaders/skybox/skybox.frag", VK_SHADER_STAGE_FRAGMENT_BIT, {} });
-		matInfo.shaderStages.push_back({ "res/shaders/skybox/skybox.vert", VK_SHADER_STAGE_VERTEX_BIT, {} });
+		matInfo.shaderStages.push_back({ "skybox/skybox.frag", {} });
+		matInfo.shaderStages.push_back({ "skybox/skybox.vert", {} });
 		mat = new VulkanMaterial(&matInfo, scene, mainPass);
 		matInst = new VulkanMaterialInstance(mat);
 		for (VulkanDescriptorSet* set : matInst->descriptorSets) { set->write(0, skybox); }

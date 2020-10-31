@@ -2,7 +2,7 @@
 
 #include <vulkan/vulkan.h>
 
-#include "../VulkanShader.h"
+#include "../shader/ShaderVariant.h"
 #include "../VulkanUniform.h"
 #include "../scene/Scene.h"
 
@@ -18,11 +18,11 @@ namespace vku {
 		VulkanTexture* brdf_lut,
 		Scene* scene,
 		Pass* pass,
-		std::vector<ShaderMacro> macros) {
+		std::map<std::string, std::string> macros) {
 
 		VulkanMaterialInfo info(scene->device);
-		info.shaderStages.push_back({ "res/shaders/pbr/pbr.vert", VK_SHADER_STAGE_VERTEX_BIT, macros });
-		info.shaderStages.push_back({ "res/shaders/pbr/pbr.frag", VK_SHADER_STAGE_FRAGMENT_BIT, macros });
+		info.shaderStages.push_back({ "pbr/pbr.vert", macros });
+		info.shaderStages.push_back({ "pbr/pbr.frag", macros });
 		this->mat = new VulkanMaterial(&info, scene, pass);
 		this->matInstance = new VulkanMaterialInstance(mat);
 
@@ -49,14 +49,14 @@ namespace vku {
 		VulkanTexture* brdf_lut,
 		Scene* scene,
 		Pass* pass,
-		std::vector<ShaderMacro> macros) {
+		std::map<std::string, std::string> macros) {
 
 		uniform = new VulkanUniform(scene->device, sizeof(PbrUniform));
 		uniform->write(&data);
 
 		VulkanMaterialInfo info(scene->device);
-		info.shaderStages.push_back({ "res/shaders/pbr/pbr.vert", VK_SHADER_STAGE_VERTEX_BIT, macros });
-		info.shaderStages.push_back({ "res/shaders/pbr/pbr_textureless.frag", VK_SHADER_STAGE_FRAGMENT_BIT, macros });
+		info.shaderStages.push_back({ "pbr/pbr.vert", macros });
+		info.shaderStages.push_back({ "pbr/pbr_textureless.frag", macros });
 		this->mat = new VulkanMaterial(&info, scene, pass);
 		this->matInstance = new VulkanMaterialInstance(mat);
 

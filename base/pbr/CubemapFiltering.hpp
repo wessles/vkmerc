@@ -193,10 +193,11 @@ namespace vku {
 		pipelineBuilder.pipeline.pStages = shaderStages.data();
 
 		// Look-up-table (from BRDF) pipeline
-		VulkanShader* vertStageModule = new VulkanShader(device, lazyLoadSpirv(cubemapFilterParams.filterVertShader));
-		shaderStages[0] = vertStageModule->getShaderStage(VK_SHADER_STAGE_VERTEX_BIT);
-		VulkanShader* fragStageModule = new VulkanShader(device, lazyLoadSpirv(cubemapFilterParams.filterFragShader));
-		shaderStages[1] = fragStageModule->getShaderStage(VK_SHADER_STAGE_FRAGMENT_BIT);
+
+		ShaderModule* vertStageModule = device->shaderCache->get(cubemapFilterParams.filterVertShader);
+		shaderStages[0] = vertStageModule->getStageInfo();
+		ShaderModule* fragStageModule = device->shaderCache->get(cubemapFilterParams.filterFragShader);
+		shaderStages[1] = fragStageModule->getStageInfo();
 
 		pipelineBuilder.pipeline.layout = pipelinelayout;
 		pipelineBuilder.pipeline.renderPass = renderpass;
@@ -205,9 +206,6 @@ namespace vku {
 		if (vkCreateGraphicsPipelines(*device, nullptr, 1, &pipelineBuilder.pipeline, nullptr, &pipeline) != VK_SUCCESS) {
 			throw std::runtime_error("Failed to create graphics pipeline.");
 		}
-
-		delete vertStageModule;
-		delete fragStageModule;
 
 		// Render
 
@@ -330,8 +328,8 @@ namespace vku {
 		filter.cubemap = cubemap;
 		filter.dim = 64;
 		filter.format = VK_FORMAT_R32G32B32A32_SFLOAT;
-		filter.filterVertShader = "res/shaders/pbr_gen/filtercube.vert";
-		filter.filterFragShader = "res/shaders/pbr_gen/irradiancecube.frag";
+		filter.filterVertShader = "pbr_gen/filtercube.vert";
+		filter.filterFragShader = "pbr_gen/irradiancecube.frag";
 
 		uint32_t numMips = static_cast<uint32_t>(floor(log2(filter.dim))) + 1;
 
@@ -363,8 +361,8 @@ namespace vku {
 		filter.cubemap = cubemap;
 		filter.dim = 512;
 		filter.format = VK_FORMAT_R32G32B32A32_SFLOAT;
-		filter.filterVertShader = "res/shaders/pbr_gen/filtercube.vert";
-		filter.filterFragShader = "res/shaders/pbr_gen/prefilterenvmap.frag";
+		filter.filterVertShader = "pbr_gen/filtercube.vert";
+		filter.filterFragShader = "pbr_gen/prefilterenvmap.frag";
 
 		uint32_t numMips = static_cast<uint32_t>(floor(log2(filter.dim))) + 1;
 

@@ -52,7 +52,7 @@ namespace vku {
 
 		VulkanGltfModel() {}
 
-		VulkanGltfModel(const std::string& filename, Scene* scene, Pass* pass, VulkanTexture* brdf_lut, VulkanTexture* diffuse_ibl, VulkanTexture* specular_ibl, std::vector<ShaderMacro> macros = {}) {
+		VulkanGltfModel(const std::string& filename, Scene* scene, Pass* pass, VulkanTexture* brdf_lut, VulkanTexture* diffuse_ibl, VulkanTexture* specular_ibl, std::map<std::string, std::string> macros = {}) {
 			tinygltf::Model model;
 
 			tinygltf::TinyGLTF loader;
@@ -208,7 +208,7 @@ namespace vku {
 			}
 		}
 
-		void loadMaterials(Scene* scene, Pass* pass, tinygltf::Model& model, VulkanTexture* brdf_lut, VulkanTexture* diffuse_ibl, VulkanTexture* specular_ibl, std::vector<ShaderMacro> macros) {
+		void loadMaterials(Scene* scene, Pass* pass, tinygltf::Model& model, VulkanTexture* brdf_lut, VulkanTexture* diffuse_ibl, VulkanTexture* specular_ibl, std::map<std::string, std::string> macros) {
 			materials.resize(model.materials.size());
 
 			for (uint32_t i = 0; i < model.materials.size(); i++) {

@@ -2,6 +2,7 @@
 
 #include <unordered_map>
 #include <filesystem>
+#include <iostream>
 
 #include <glm/glm.hpp>
 #include <glm/gtx/string_cast.hpp>
@@ -21,7 +22,7 @@ static std::string GetBaseDir(const std::string& filepath) {
 
 namespace vku {
 
-	VulkanObjModel::VulkanObjModel(const std::string& filename, Scene* scene, Pass* pass, VulkanTexture* specular_ibl, VulkanTexture* diffuse_ibl, VulkanTexture* brdf_lut, std::vector<ShaderMacro> macros) {
+	VulkanObjModel::VulkanObjModel(const std::string& filename, Scene* scene, Pass* pass, VulkanTexture* specular_ibl, VulkanTexture* diffuse_ibl, VulkanTexture* brdf_lut, std::map<std::string, std::string> macros) {
 		VulkanMeshData meshData{};
 
 		std::string base_dir = GetBaseDir(filename);

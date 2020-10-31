@@ -5,15 +5,16 @@
 #include <vulkan/vulkan.h>
 
 #include "../VulkanDevice.h"
-#include "../VulkanShader.h"
+#include "../shader/ShaderModule.h"
 #include "../VulkanMaterial.h"
 #include "../VulkanTexture.h"
 #include "../VulkanDescriptorSet.h"
+#include "../shader/ShaderCache.h"
 
 namespace vku {
 	// Adapted from Sascha Willems' pbrtexture.cpp
 	// Generate a BRDF integration map used as a look-up-table (stores roughness / NdotV)
-	VulkanTexture* generateBRDFLUT(VulkanDevice *device, uint32_t dim = 512)
+	VulkanTexture* generateBRDFLUT(VulkanDevice* device, uint32_t dim = 512)
 	{
 		const VkFormat format = VK_FORMAT_R16G16_SFLOAT;	// R16G16 is supported pretty much everywhere
 
@@ -160,10 +161,10 @@ namespace vku {
 		pipelineBuilder.pipeline.pStages = shaderStages.data();
 
 		// Look-up-table (from BRDF) pipeline
-		VulkanShader* vertStageModule = new VulkanShader(device, lazyLoadSpirv("res/shaders/pbr_gen/genbrdflut.vert"));
-		shaderStages[0] = vertStageModule->getShaderStage(VK_SHADER_STAGE_VERTEX_BIT);
-		VulkanShader* fragStageModule = new VulkanShader(device, lazyLoadSpirv("res/shaders/pbr_gen/genbrdflut.frag"));
-		shaderStages[1] = fragStageModule->getShaderStage(VK_SHADER_STAGE_FRAGMENT_BIT);
+		ShaderModule* vertStageModule = device->shaderCache->get("pbr_gen/genbrdflut.vert");
+		shaderStages[0] = vertStageModule->getStageInfo();
+		ShaderModule* fragStageModule = device->shaderCache->get("pbr_gen/genbrdflut.frag");
+		shaderStages[1] = fragStageModule->getStageInfo();
 
 		pipelineBuilder.pipeline.layout = pipelinelayout;
 		pipelineBuilder.pipeline.renderPass = renderpass;
@@ -172,9 +173,6 @@ namespace vku {
 		if (vkCreateGraphicsPipelines(*device, nullptr, 1, &pipelineBuilder.pipeline, nullptr, &pipeline) != VK_SUCCESS) {
 			throw std::runtime_error("Failed to create graphics pipeline!");
 		}
-
-		delete vertStageModule;
-		delete fragStageModule;
 
 		// Render
 		VkClearValue clearValues[1];

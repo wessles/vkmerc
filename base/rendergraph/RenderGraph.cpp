@@ -9,8 +9,9 @@
 #include "VulkanSwapchain.h"
 #include "VulkanDescriptorSet.h"
 #include "VulkanTexture.h"
-#include <VulkanMaterial.h>
-#include <VulkanMesh.h>
+#include "VulkanMaterial.h"
+#include "VulkanMesh.h"
+#include "shader/ShaderVariant.h"
 
 namespace vku {
 	RenderGraphSchema::RenderGraphSchema() {}
@@ -346,15 +347,16 @@ namespace vku {
 			// generate one material automatically, if it's a blitPass
 			if (schema.isBlitPass) {
 				VulkanMaterialInfo matInfo(device);
-				matInfo.shaderStages.push_back({ "res/shaders/blit/blit.vert", VK_SHADER_STAGE_VERTEX_BIT, {} });
-				matInfo.shaderStages.push_back({ schema.blitPassShader, VK_SHADER_STAGE_FRAGMENT_BIT, {} });
+				matInfo.shaderStages.push_back({ "blit/blit.vert", {} });
+				matInfo.shaderStages.push_back({ schema.blitPassShader, {} });
 				passNode->blitPassMaterial = new VulkanMaterial(&matInfo, scene, passNode);
 				passNode->blitPassMaterialInstance = new VulkanMaterialInstance(passNode->blitPassMaterial);
 			}
 		}
 	}
 	void RenderGraph::destroyLayouts() {
-		delete blitMesh;
+		if(blitMesh != nullptr)
+			delete blitMesh;
 		for (Pass* node : nodes) {
 			if (node->schema->isBlitPass) {
 				delete node->blitPassMaterialInstance;

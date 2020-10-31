@@ -2,6 +2,8 @@
 
 #pragma once
 
+#include <map>
+#include <string>
 #include <glm/glm.hpp>
 
 #include "../VulkanTexture.h"
@@ -24,7 +26,7 @@ namespace vku {
 			VulkanTexture* brdf_lut,
 			Scene* scene,
 			Pass* pass,
-			std::vector<ShaderMacro> macros = {});
+			std::map<std::string, std::string> macros = {});
 		~PbrMaterial();
 	};
 
@@ -47,7 +49,7 @@ namespace vku {
 			VulkanTexture* brdf_lut,
 			Scene* scene,
 			Pass* pass,
-			std::vector<ShaderMacro> macros = {});
+			std::map<std::string, std::string> macros = {});
 		~TexturelessPbrMaterial();
 	};
 }

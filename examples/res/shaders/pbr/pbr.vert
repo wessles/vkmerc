@@ -30,6 +30,7 @@ layout(location = 1) out vec3 fragColor;
 layout(location = 2) out vec2 fragTexCoord;
 layout(location = 3) out vec3 fragNormal;
 layout(location = 4) out vec4 fragTangent;
+layout(location = 5) out float depth;
 
 void main() {
     fragColor = inColor;
@@ -41,4 +42,6 @@ void main() {
     fragTangent = inTangent.xyzw;
 	
     gl_Position = global.proj * global.view * vec4(fragPosition, 1.0);
+
+	depth = gl_Position.z;
 }

@@ -5,7 +5,7 @@
 
 #include <vulkan/vulkan.h>
 
-#include "VulkanShader.h"
+#include "shader/ShaderCache.h"
 #include "VulkanDescriptorSet.h"
 
 namespace vku {
@@ -15,12 +15,6 @@ namespace vku {
 	struct VulkanDescriptorSet;
 	struct VulkanDescriptorSetLayout;
 	struct Pass;
-
-	struct ShaderInfo {
-		std::string filename;
-		VkShaderStageFlagBits stage;
-		std::vector<ShaderMacro> macros;
-	};
 
 	struct VulkanMaterialInfo {
 		VkGraphicsPipelineCreateInfo pipeline{};
@@ -46,15 +40,22 @@ namespace vku {
 
 		std::vector<VkPushConstantRange> pushConstRanges{};
 
-		std::vector<ShaderInfo> shaderStages;
+		std::vector<ShaderVariant> shaderStages;
 
 		VulkanDevice* device;
 
 		VulkanMaterialInfo(VulkanDevice* const device);
+	
+		// link pointers inside structs to reference each other
+		// useful right after a copy constructor
+		void linkPointers();
 	};
 
 	struct VulkanMaterial {
+		VulkanMaterialInfo *info;
+
 		Scene* scene;
+		Pass* pass;
 
 		VkPipeline pipeline;
 		VkPipelineLayout pipelineLayout;
@@ -63,11 +64,14 @@ namespace vku {
 
 		VulkanMaterial(VulkanMaterialInfo* const matInfo, Scene* const scene, Pass* const pass);
 
-		VulkanMaterial() {}
-
+		void rebuild();
 		void bind(VkCommandBuffer cb);
 
 		~VulkanMaterial();
+
+	private:
+		void init();
+		void destroy();
 	};
 
 	struct VulkanMaterialInstance {

@@ -9,6 +9,7 @@
 
 #include "VulkanContext.h"
 #include "VulkanSwapchain.h"
+#include "shader/ShaderCache.h"
 
 namespace vku {
 	bool checkDeviceExtensionSupport(VkPhysicalDevice device, const std::vector<const char*> deviceExtensions) {
@@ -239,9 +240,13 @@ namespace vku {
 
 		// create swapchain
 		this->swapchain = new VulkanSwapchain(this);
+
+		// create runtime shader cache
+		this->shaderCache = new ShaderCache(this);
 	}
 
 	VulkanDevice::~VulkanDevice() {
+		delete shaderCache;
 		delete swapchain;
 		vkDestroyDescriptorPool(handle, descriptorPool, nullptr);
 		vkDestroyCommandPool(handle, commandPool, nullptr);
