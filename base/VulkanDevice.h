@@ -10,6 +10,7 @@ namespace vku {
 	struct VulkanContext;
 	struct VulkanSwapchain;
 	struct ShaderCache;
+	struct TextureCommons;
 
 	struct DeviceSupportInformation {
 		std::optional<uint32_t> graphicsFamily;
@@ -57,6 +58,7 @@ namespace vku {
 		VulkanSwapchain* swapchain;
 
 		ShaderCache* shaderCache;
+		TextureCommons* textureCommons;
 
 		VulkanDevice(VulkanDeviceInfo info);
 		~VulkanDevice();

@@ -7,6 +7,8 @@
 #include <vulkan/vulkan.h>
 
 #include "VulkanTexture.h"
+#include "shader/ShaderVariant.h"
+#include "VulkanMaterial.h"
 
 namespace vku {
 
@@ -15,36 +17,64 @@ namespace vku {
 
 	struct AttachmentSchema;
 
+	struct PassReadOptions {
+		bool clear = false;
+		VkClearColorValue colorClearValue = { 1.0, 0.0, 1.0, 1.0 };
+		VkClearDepthStencilValue depthClearValue = { 1.0, 0 };
+	};
+
+	struct PassAttachmentRead {
+		AttachmentSchema* attachment;
+		PassReadOptions options;
+
+		operator AttachmentSchema* () const { return attachment; }
+	};
+
+	struct PassWriteOptions {
+		bool clear = true;
+		VkClearColorValue colorClearValue = { 1.0, 0.0, 1.0, 1.0 };
+		VkClearDepthStencilValue depthClearValue = { 1.0, 0 };
+
+		// transition attachment to sampled after this render pass
+		bool sampled = true;
+	};
+
+	struct PassAttachmentWrite {
+		AttachmentSchema* attachment;
+		PassWriteOptions options;
+
+		operator AttachmentSchema* () const { return attachment; }
+	};
+
 	struct PassSchema {
 		std::string name;
 
-		std::vector<AttachmentSchema*> in;
-		std::vector<AttachmentSchema*> out;
+		std::vector<PassAttachmentRead> in;
+		std::vector<PassAttachmentWrite> out;
+
+		uint32_t layerMask = 1;
 
 		VkSampleCountFlagBits samples = VK_SAMPLE_COUNT_1_BIT;
 
-		std::function<void(const uint32_t, const VkCommandBuffer&)> commands;
-		
+		bool materialOverride = false;
+		VulkanMaterialInfo overrideMaterialInfo;
+
 		bool isBlitPass = false;
-		std::string blitPassShader;
+		VulkanMaterialInfo blitPassMaterialInfo;
 
 		PassSchema(const std::string name) {
 			this->name = name;
 		}
+
+		PassAttachmentRead* read(size_t slot, AttachmentSchema* in, PassReadOptions options = {});
+		PassAttachmentWrite* write(size_t slot, AttachmentSchema* out, PassWriteOptions  options = {});
 	};
 
 	struct AttachmentSchema {
 		std::string name;
 
-		PassSchema* from;
-		std::vector<PassSchema*> to;
-
 		VkFormat format;
 		VkSampleCountFlagBits samples = VK_SAMPLE_COUNT_1_BIT;
-
-		bool clearOnLoad = true;
-		VkClearColorValue clearColor = {1.0f, 0.0f, 1.0f, 1.0f};
-		VkClearDepthStencilValue clearDepthStencil = { 1.0f, 0 };
 
 		// if so, no image will be created for this attachment, and the corresponding swapchain will be assumed as its image
 		bool isSwapchain = false;
@@ -79,9 +109,10 @@ namespace vku {
 		RenderGraphSchema();
 		~RenderGraphSchema();
 
-		PassSchema* pass(const std::string& name, std::function<void(const uint32_t, const VkCommandBuffer&)> commands);
-		PassSchema* blitPass(const std::string& name, const std::string& shader, std::function<void(const uint32_t, const VkCommandBuffer&)> commands = nullptr);
-		AttachmentSchema* attachment(const std::string& name, PassSchema* from, std::vector<PassSchema*> to);
+		PassSchema* pass(const std::string& name);
+		PassSchema* blitPass(const std::string& name, const ShaderVariant& shaderVariant);
+		PassSchema* blitPass(const std::string& name, const VulkanMaterialInfo& blitShaderInfo);
+		AttachmentSchema* attachment(const std::string& name);
 	};
 
 	// RenderGraph
@@ -103,6 +134,7 @@ namespace vku {
 
 	struct AttachmentInstance {
 		VulkanTexture* texture;
+		VkImageLayout currentLayout;
 	};
 
 	struct RenderGraph;
@@ -115,9 +147,9 @@ namespace vku {
 		// this will be set during the createInstances function, based on outgoing edge dimensions (which must be equal)
 		uint32_t width, height;
 
-		// this only exists if schema.isBlitPass
-		VulkanMaterial* blitPassMaterial = nullptr;
-		VulkanMaterialInstance* blitPassMaterialInstance = nullptr;
+		// this only exists if schema.materialOverride or schema.isBlitPass
+		VulkanMaterial* material = nullptr;
+		VulkanMaterialInstance* materialInstance = nullptr;
 
 		const PassSchema* schema;
 
@@ -129,8 +161,6 @@ namespace vku {
 	};
 
 	struct Attachment {
-		std::vector<Pass*> to;
-
 		// this will be set during the createInstances function, based on schema and (optionally) swapchain dimensions
 		uint32_t width, height;
 
@@ -154,7 +184,7 @@ namespace vku {
 		uint32_t numInstances;
 
 	public:
-		VulkanMeshBuffer *blitMesh = nullptr;
+		VulkanMeshBuffer* blitMesh = nullptr;
 
 		RenderGraph(RenderGraphSchema* schema, Scene* scene, uint32_t numInstances);
 		~RenderGraph();

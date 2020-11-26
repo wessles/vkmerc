@@ -9,9 +9,10 @@
 #include  "../VulkanContext.h"
 #include  "../VulkanDevice.h"
 #include  "../VulkanSwapchain.h"
+#include "../scene/Object.h"
 
 namespace vku {
-	struct VulkanImguiInstance {
+	struct VulkanImguiInstance : Object {
 		VulkanImguiInstance(VulkanContext *context, VkRenderPass pass) {
 			IMGUI_CHECKVERSION();
 			ImGui::CreateContext();
@@ -51,8 +52,11 @@ namespace vku {
 			ImGui::Render();
 		}
 
-		void Render(VkCommandBuffer cb) {
-			ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), cb);
+		virtual glm::mat4 getAABBTransform() {
+			return glm::mat4(0.0);
+		};
+		virtual void render(VkCommandBuffer cmdBuf, uint32_t swapIdx, bool noMaterial) {
+			ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), cmdBuf);
 		}
 
 		~VulkanImguiInstance() {

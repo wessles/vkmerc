@@ -22,7 +22,7 @@ static std::string GetBaseDir(const std::string& filepath) {
 
 namespace vku {
 
-	VulkanObjModel::VulkanObjModel(const std::string& filename, Scene* scene, Pass* pass, VulkanTexture* specular_ibl, VulkanTexture* diffuse_ibl, VulkanTexture* brdf_lut, std::map<std::string, std::string> macros) {
+	VulkanObjModel::VulkanObjModel(const std::string& filename, Scene* scene, Pass* pass, std::map<std::string, std::string> macros) {
 		VulkanMeshData meshData{};
 
 		std::string base_dir = GetBaseDir(filename);
@@ -108,7 +108,7 @@ namespace vku {
 			uniform.emissive = emission;
 			uniform.metallic = metallic;
 			uniform.roughness = roughness;
-			this->mat = new TexturelessPbrMaterial(uniform, specular_ibl, diffuse_ibl, brdf_lut, scene, pass, macros);
+			this->mat = new TexturelessPbrMaterial(uniform, scene, pass, macros);
 		}
 	}
 

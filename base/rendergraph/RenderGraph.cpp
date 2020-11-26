@@ -14,6 +14,20 @@
 #include "shader/ShaderVariant.h"
 
 namespace vku {
+	PassAttachmentRead* PassSchema::read(size_t slot, AttachmentSchema* in, PassReadOptions options) {
+		if (this->in.size() <= slot)
+			this->in.resize(slot + 1);
+		this->in[slot] = { in, options };
+		return &this->in[slot];
+	}
+
+	PassAttachmentWrite* PassSchema::write(size_t slot, AttachmentSchema* out, PassWriteOptions  options) {
+		if (this->out.size() <= slot)
+			this->out.resize(slot + 1);
+		this->out[slot] = { out, options };
+		return &this->out[slot];
+	}
+
 	RenderGraphSchema::RenderGraphSchema() {}
 	RenderGraphSchema::~RenderGraphSchema() {
 		for (auto* att : edges)
@@ -21,33 +35,27 @@ namespace vku {
 		for (auto* pass : nodes)
 			delete pass;
 	}
-	PassSchema* RenderGraphSchema::pass(const std::string& name, std::function<void(const uint32_t, const VkCommandBuffer&)> commands) {
+	PassSchema* RenderGraphSchema::pass(const std::string& name) {
 		PassSchema* node = new PassSchema(name);
-		node->commands = commands;
 		nodes.push_back(node);
 		return node;
 	}
-	PassSchema* RenderGraphSchema::blitPass(const std::string& name, const std::string& shader, std::function<void(const uint32_t, const VkCommandBuffer&)> commands) {
+	PassSchema* RenderGraphSchema::blitPass(const std::string& name, const ShaderVariant& shaderVariant) {
+		VulkanMaterialInfo matInfo;
+		matInfo.shaderStages.push_back(shaderVariant);
+		matInfo.shaderStages.push_back({ "blit/blit.vert", {} });
+		return blitPass(name, matInfo);
+	}
+	PassSchema* RenderGraphSchema::blitPass(const std::string& name, const VulkanMaterialInfo& materialInfo) {
 		PassSchema* node = new PassSchema(name);
-		node->commands = commands;
 		node->isBlitPass = true;
-		node->blitPassShader = shader;
+		node->blitPassMaterialInfo = materialInfo;
 		nodes.push_back(node);
 		return node;
 	}
-	AttachmentSchema* RenderGraphSchema::attachment(const std::string& name, PassSchema* from, std::vector<PassSchema*> to) {
+
+	AttachmentSchema* RenderGraphSchema::attachment(const std::string& name) {
 		AttachmentSchema* edge = new AttachmentSchema(name);
-		edge->from = from;
-		edge->to = to;
-
-		if (edge->from != nullptr) {
-			edge->from->out.push_back(edge);
-		}
-
-		for (PassSchema* node : edge->to) {
-			node->in.push_back(edge);
-		}
-
 		edges.push_back(edge);
 		return edge;
 	}
@@ -75,12 +83,11 @@ namespace vku {
 		// connect them
 		for (uint32_t i = 0; i < nodes.size(); i++) {
 			Pass* passNode = nodes[i];
-			for (auto* edge : passNode->schema->in) {
+			for (AttachmentSchema* edge : passNode->schema->in) {
 				Attachment* att = getAttachment(edge->name);
-				att->to.push_back(passNode);
 				passNode->in.push_back(att);
 			}
-			for (auto* edge : passNode->schema->out) {
+			for (AttachmentSchema* edge : passNode->schema->out) {
 				passNode->out.push_back(getAttachment(edge->name));
 			}
 		}
@@ -127,18 +134,19 @@ namespace vku {
 
 			// generate one render pass for each node
 			{
-				std::vector<VkAttachmentDescription> attachments;
-				std::vector<VkAttachmentReference> inputRefs;
-				std::vector<VkAttachmentReference> outputRefs;
-				VkAttachmentReference depthOutputRef;
+				std::vector<VkAttachmentDescription2> attachments;
+				std::vector<VkAttachmentReference2> inputRefs;
+				std::vector<VkAttachmentReference2> outputRefs;
+				VkAttachmentReference2 depthOutputRef;
 				bool depthWrite = false;
 
 				uint32_t i = 0;
 
-				for (auto& edge : schema.in) {
+				for (AttachmentSchema* edge : schema.in) {
 					if (!edge->isInputAttachment) continue;
 
-					VkAttachmentDescription attachment{};
+					VkAttachmentDescription2 attachment{};
+					attachment.sType = VK_STRUCTURE_TYPE_ATTACHMENT_DESCRIPTION_2;
 					attachment.format = edge->format;
 					attachment.samples = edge->samples;
 					attachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
@@ -156,110 +164,184 @@ namespace vku {
 
 
 					attachments.push_back(attachment);
-					inputRefs.push_back({ i++, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL });
+
+					inputRefs.push_back({
+					.sType = VK_STRUCTURE_TYPE_ATTACHMENT_REFERENCE_2,
+					.attachment = i++,
+					.layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+					.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT
+						});
 				}
 
-				// -1 = not found
-				int attachmentIndexToResolve = -1;
-				AttachmentSchema* swapchainAttachmentSchema = nullptr;
+				std::vector<AttachmentSchema*> colorResolveAttachments{};
+				AttachmentSchema* depthResolveAttachmentSchema = nullptr;
 
-				for (AttachmentSchema* edge : schema.out) {
-					VkAttachmentDescription attachment{};
-					attachment.format = edge->format;
-					attachment.samples = edge->samples;
-					if (edge->clearOnLoad) {
+				for (PassAttachmentWrite edge : schema.out) {
+					VkAttachmentDescription2 attachment{};
+					attachment.sType = VK_STRUCTURE_TYPE_ATTACHMENT_DESCRIPTION_2;
+					attachment.format = edge.attachment->format;
+					attachment.samples = edge.attachment->samples;
+					attachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+					attachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+
+					if (edge.options.clear) {
 						attachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
 						attachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+					}
+					else if (!edge.attachment->isSwapchain) {
+						attachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+						attachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
 					}
 					else {
 						attachment.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
 						attachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
 					}
-					attachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-					attachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-					attachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 
-					if (edge->isDepth) {
+					// initial layout
+					if (edge.attachment->isDepth) {
+						attachment.initialLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+					}
+					else if (!edge.attachment->isSwapchain) {
+						attachment.initialLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+					}
+					else {
+						attachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+					}
+
+					// final layout
+					if (edge.attachment->isDepth) {
 						attachment.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
 					}
 					else {
 						attachment.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 					}
 
-					if (edge->isSwapchain && edge->isDepth) {
-						throw std::runtime_error("Cannot present a depth layout image!");
+					if (edge.attachment->resolve) {
+						if (edge.attachment->isDepth) {
+							depthResolveAttachmentSchema = edge;
+						}
+						else {
+							colorResolveAttachments.push_back(edge);
+						}
 					}
-
-					if (edge->resolve) {
-						attachmentIndexToResolve = i;
-						swapchainAttachmentSchema = edge;
-					}
-					else if (edge->isSwapchain) {
+					else if (edge.attachment->isSwapchain) {
 						attachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
 					}
 
-					if (edge->isSampled) {
+					if (edge.options.sampled) {
 						attachment.finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 					}
 
-					if (edge->isDepth) {
+					if (edge.attachment->isDepth) {
 						if (depthWrite) {
 							throw std::runtime_error("Cannot write to multiple depth attachments!");
 						}
 						depthWrite = true;
 						attachments.push_back(attachment);
-						depthOutputRef = { i++, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL };
+						depthOutputRef = {
+						.sType = VK_STRUCTURE_TYPE_ATTACHMENT_REFERENCE_2,
+						.attachment = i++,
+						.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+						.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT
+						};
 					}
 					else {
 						attachments.push_back(attachment);
-						outputRefs.push_back({ i++, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL });
+						outputRefs.push_back({
+						.sType = VK_STRUCTURE_TYPE_ATTACHMENT_REFERENCE_2,
+						.attachment = i++,
+						.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+						.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT
+							});
 					}
 				}
 
-				VkAttachmentReference resolveRef;
-				VkAttachmentReference* resolveRefPtr = nullptr;
-
-				if (attachmentIndexToResolve != -1) {
-					VkAttachmentDescription colorAttachmentResolve{};
-					colorAttachmentResolve.format = swapchainAttachmentSchema->format;
+				std::vector<VkAttachmentReference2> resolveRefs{};
+				for (auto* attachment : colorResolveAttachments) {
+					VkAttachmentDescription2 colorAttachmentResolve{};
+					colorAttachmentResolve.sType = VK_STRUCTURE_TYPE_ATTACHMENT_DESCRIPTION_2;
+					colorAttachmentResolve.format = attachment->format;
 					colorAttachmentResolve.samples = VK_SAMPLE_COUNT_1_BIT;
 					colorAttachmentResolve.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
 					colorAttachmentResolve.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
 					colorAttachmentResolve.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
 					colorAttachmentResolve.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+
 					colorAttachmentResolve.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 
-					if (swapchainAttachmentSchema->isSwapchain) {
+					if (attachment->isSwapchain) {
 						colorAttachmentResolve.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
 					}
-					else if (swapchainAttachmentSchema->isSampled) {
+					else if (attachment->isSampled) {
 						colorAttachmentResolve.finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-					}
-					else if (swapchainAttachmentSchema->format != device->swapchain->depthFormat) {
-						colorAttachmentResolve.finalLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
 					}
 					else {
 						colorAttachmentResolve.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 					}
 
 					attachments.push_back(colorAttachmentResolve);
-					resolveRef = { i++, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL };
-					resolveRefPtr = &resolveRef;
+					VkAttachmentReference2 colorResolveRef{
+						.sType = VK_STRUCTURE_TYPE_ATTACHMENT_REFERENCE_2,
+						.attachment = i++,
+						.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+						.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT
+					};
+					resolveRefs.push_back(colorResolveRef);
 				}
 
-				VkSubpassDescription subpass{};
+				VkAttachmentReference2 depthResolveRef;
+				if (depthResolveAttachmentSchema != nullptr) {
+					VkAttachmentDescription2 depthAttachmentResolve{};
+					depthAttachmentResolve.sType = VK_STRUCTURE_TYPE_ATTACHMENT_DESCRIPTION_2;
+					depthAttachmentResolve.format = depthResolveAttachmentSchema->format;
+					depthAttachmentResolve.samples = VK_SAMPLE_COUNT_1_BIT;
+					depthAttachmentResolve.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+					depthAttachmentResolve.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+					depthAttachmentResolve.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+					depthAttachmentResolve.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+					depthAttachmentResolve.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+
+					if (depthResolveAttachmentSchema->isSampled) {
+						depthAttachmentResolve.finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+					}
+					else {
+						depthAttachmentResolve.finalLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
+					}
+					attachments.push_back(depthAttachmentResolve);
+					depthResolveRef = {
+						.sType = VK_STRUCTURE_TYPE_ATTACHMENT_REFERENCE_2,
+						.attachment = i++,
+						.layout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+						.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT
+					};
+				}
+
+				VkSubpassDescription2 subpass{};
+				subpass.sType = VK_STRUCTURE_TYPE_SUBPASS_DESCRIPTION_2;
 				subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
 				subpass.colorAttachmentCount = static_cast<uint32_t>(outputRefs.size());
 				subpass.pColorAttachments = outputRefs.data();
 				subpass.inputAttachmentCount = static_cast<uint32_t>(inputRefs.size());
 				subpass.pInputAttachments = inputRefs.data();
-				subpass.pResolveAttachments = resolveRefPtr;
 				if (depthWrite)
 					subpass.pDepthStencilAttachment = &depthOutputRef;
+				subpass.pResolveAttachments = resolveRefs.data();
 
-				std::vector<VkSubpassDependency> dependencies;
+				// add depth resolve to subpass if necessary
+				VkSubpassDescriptionDepthStencilResolve depthStencilResolve{};
+				if (depthResolveAttachmentSchema != nullptr) {
+					depthStencilResolve.sType = VK_STRUCTURE_TYPE_SUBPASS_DESCRIPTION_DEPTH_STENCIL_RESOLVE;
+					depthStencilResolve.stencilResolveMode = VK_RESOLVE_MODE_SAMPLE_ZERO_BIT;
+					depthStencilResolve.depthResolveMode = VK_RESOLVE_MODE_SAMPLE_ZERO_BIT;
+					depthStencilResolve.pDepthStencilResolveAttachment = &depthResolveRef;
+
+					subpass.pNext = &depthStencilResolve;
+				}
+
+				std::vector<VkSubpassDependency2> dependencies;
 				dependencies.resize(2);
 
+				dependencies[0].sType = VK_STRUCTURE_TYPE_SUBPASS_DEPENDENCY_2;
 				dependencies[0].srcSubpass = VK_SUBPASS_EXTERNAL;
 				dependencies[0].dstSubpass = 0;
 				dependencies[0].srcStageMask = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
@@ -271,6 +353,7 @@ namespace vku {
 				if (depthWrite) {
 					dependencies.resize(3);
 
+					dependencies[1].sType = VK_STRUCTURE_TYPE_SUBPASS_DEPENDENCY_2;
 					dependencies[1].srcSubpass = 0;
 					dependencies[1].dstSubpass = VK_SUBPASS_EXTERNAL;
 					dependencies[1].srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
@@ -279,6 +362,7 @@ namespace vku {
 					dependencies[1].dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
 					dependencies[1].dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT;
 
+					dependencies[2].sType = VK_STRUCTURE_TYPE_SUBPASS_DEPENDENCY_2;
 					dependencies[2].srcSubpass = 0;
 					dependencies[2].dstSubpass = VK_SUBPASS_EXTERNAL;
 					dependencies[2].srcStageMask = VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
@@ -288,6 +372,7 @@ namespace vku {
 					dependencies[2].dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT;
 				}
 				else {
+					dependencies[1].sType = VK_STRUCTURE_TYPE_SUBPASS_DEPENDENCY_2;
 					dependencies[1].srcSubpass = 0;
 					dependencies[1].dstSubpass = VK_SUBPASS_EXTERNAL;
 					dependencies[1].srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
@@ -297,8 +382,8 @@ namespace vku {
 					dependencies[1].dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT;
 				}
 
-				VkRenderPassCreateInfo renderPassCreateInfo{};
-				renderPassCreateInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+				VkRenderPassCreateInfo2 renderPassCreateInfo{};
+				renderPassCreateInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO_2;
 				renderPassCreateInfo.attachmentCount = static_cast<uint32_t>(attachments.size());
 				renderPassCreateInfo.pAttachments = &attachments[0];
 				renderPassCreateInfo.subpassCount = 1;
@@ -307,7 +392,7 @@ namespace vku {
 				renderPassCreateInfo.pDependencies = dependencies.data();
 
 				VkRenderPass pass;
-				if (vkCreateRenderPass(*device, &renderPassCreateInfo, nullptr, &pass) != VK_SUCCESS) {
+				if (vkCreateRenderPass2(*device, &renderPassCreateInfo, nullptr, &pass) != VK_SUCCESS) {
 					throw std::runtime_error("Failed to create render pass.");
 				}
 				passNode->pass = pass;
@@ -316,7 +401,9 @@ namespace vku {
 			{
 				std::vector<DescriptorLayout> layouts;
 				for (auto& inputEdge : schema.in) {
-					layouts.push_back({ VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT });
+					layouts.push_back(DescriptorLayout{
+						.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+						.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT });
 				}
 				passNode->inputLayout = new VulkanDescriptorSetLayout(device, layouts);
 			}
@@ -346,21 +433,25 @@ namespace vku {
 			}
 			// generate one material automatically, if it's a blitPass
 			if (schema.isBlitPass) {
-				VulkanMaterialInfo matInfo(device);
-				matInfo.shaderStages.push_back({ "blit/blit.vert", {} });
-				matInfo.shaderStages.push_back({ schema.blitPassShader, {} });
-				passNode->blitPassMaterial = new VulkanMaterial(&matInfo, scene, passNode);
-				passNode->blitPassMaterialInstance = new VulkanMaterialInstance(passNode->blitPassMaterial);
+				VulkanMaterialInfo* const matInfo = const_cast<VulkanMaterialInfo*>(&schema.blitPassMaterialInfo);
+				passNode->material = new VulkanMaterial(matInfo, scene, passNode);
+				passNode->materialInstance = new VulkanMaterialInstance(passNode->material);
+			}
+			// generate one material if its a material override
+			if (schema.materialOverride) {
+				VulkanMaterialInfo* const matInfo = const_cast<VulkanMaterialInfo*>(&schema.overrideMaterialInfo);
+				passNode->material = new VulkanMaterial(matInfo, scene, passNode);
+				passNode->materialInstance = new VulkanMaterialInstance(passNode->material);
 			}
 		}
 	}
 	void RenderGraph::destroyLayouts() {
-		if(blitMesh != nullptr)
+		if (blitMesh != nullptr)
 			delete blitMesh;
 		for (Pass* node : nodes) {
-			if (node->schema->isBlitPass) {
-				delete node->blitPassMaterialInstance;
-				delete node->blitPassMaterial;
+			if (node->schema->isBlitPass || node->schema->materialOverride) {
+				delete node->materialInstance;
+				delete node->material;
 			}
 			vkDestroyPipelineLayout(*device, node->pipelineLayout, nullptr);
 			delete node->inputLayout;
@@ -452,9 +543,15 @@ namespace vku {
 						edge->resolveInstances[i] = { new VulkanTexture(device, texInfo) };
 					}
 
+					VkImageLayout imageLayout;
 					if (edge->schema->isDepth) {
-						edge->instances[i].texture->image->transitionImageLayout(VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
+						imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
 					}
+					else {
+						imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+					}
+					edge->instances[i].texture->image->transitionImageLayout(VK_IMAGE_LAYOUT_UNDEFINED, imageLayout);
+					edge->instances[i].currentLayout = imageLayout;
 				}
 			}
 			// (Part II) allocate descriptor set and framebuffers
@@ -468,7 +565,7 @@ namespace vku {
 					}
 					// (Part II.B) create framebuffers
 					{
-						std::vector<VkImageView> attachmentImageViews;
+						std::vector<VkImageView> attachmentImageViews{};
 
 						for (auto& edge : current.in) {
 							const AttachmentSchema* schema = edge->schema;
@@ -478,8 +575,7 @@ namespace vku {
 							}
 						}
 
-						bool resolveAttachmentAtEnd = false;
-						VulkanImageView* resolveAttachmentImageView = nullptr;
+						std::vector<VulkanImageView*> resolves{};
 
 						for (auto& edge : current.out) {
 							const AttachmentSchema* schema = edge->schema;
@@ -488,8 +584,7 @@ namespace vku {
 								if (schema->resolve) {
 									attachmentImageViews.push_back(*edge->instances[i].texture->view);
 
-									resolveAttachmentAtEnd = true;
-									resolveAttachmentImageView = device->swapchain->swapChainImageViews[i];
+									resolves.push_back(device->swapchain->swapChainImageViews[i]);
 								}
 								else {
 									attachmentImageViews.push_back(*device->swapchain->swapChainImageViews[i]);
@@ -499,14 +594,12 @@ namespace vku {
 								attachmentImageViews.push_back(*edge->instances[i].texture->view);
 
 								if (schema->resolve) {
-									resolveAttachmentAtEnd = true;
-									resolveAttachmentImageView = edge->resolveInstances[i].texture->view;
+									resolves.push_back(edge->resolveInstances[i].texture->view);
 								}
 							}
 						}
-
-						if (resolveAttachmentAtEnd) {
-							attachmentImageViews.push_back(*resolveAttachmentImageView);
+						for (auto* resolve : resolves) {
+							attachmentImageViews.push_back(*resolve);
 						}
 
 						// 1. all nodes have at least one outgoing attachment
@@ -530,29 +623,19 @@ namespace vku {
 				}
 			}
 		}
+
 		// Now that all nodes have allocated their descriptor sets, let's write input image references to them
 		for (uint32_t i = 0; i < numInstances; i++) {
-			for (Attachment* edge : this->edges) {
-				if (edge->schema->isTransient) continue;
-
-				for (Pass* node : edge->to) {
-					int bindingIndex = -1;
-					for (int k = 0; k < node->in.size(); k++) {
-						if (node->in[k] == edge) {
-							bindingIndex = k;
-							break;
-						}
-					}
-					if (bindingIndex == -1) {
-						throw std::runtime_error("Binding index for an edge could not be found in target node.");
-					}
-
-					if (!edge->schema->resolve) {
-						node->instances[i].descriptorSet->write(bindingIndex, edge->instances[i].texture);
+			for (Pass* node : nodes) {
+				int k = 0;
+				for (Attachment* edge : node->in) {
+					if (edge->schema->resolve) {
+						node->instances[i].descriptorSet->write(k, edge->resolveInstances[i].texture);
 					}
 					else {
-						node->instances[i].descriptorSet->write(bindingIndex, edge->resolveInstances[i].texture);
+						node->instances[i].descriptorSet->write(k, edge->instances[i].texture);
 					}
+					++k;
 				}
 			}
 		}
@@ -588,16 +671,21 @@ namespace vku {
 
 		for (auto& node : nodes) {
 			std::vector<VkClearValue> clearValues{};
-			VkClearValue clear;
-			for (Attachment* edge : node->in) {
-				clear.color = edge->schema->clearColor;
-				clear.depthStencil = edge->schema->clearDepthStencil;
-				clearValues.push_back(clear);
+			for (PassAttachmentRead edge : node->schema->in) {
+				if (edge.attachment->isDepth) {
+					clearValues.push_back(VkClearValue{ .depthStencil = edge.options.depthClearValue });
+				}
+				else {
+					clearValues.push_back(VkClearValue{ .color = edge.options.colorClearValue });
+				}
 			}
-			for (Attachment* edge : node->out) {
-				clear.color = edge->schema->clearColor;
-				clear.depthStencil = edge->schema->clearDepthStencil;
-				clearValues.push_back(clear);
+			for (PassAttachmentWrite edge : node->schema->out) {
+				if (edge.attachment->isDepth) {
+					clearValues.push_back(VkClearValue{ .depthStencil = edge.options.depthClearValue });
+				}
+				else {
+					clearValues.push_back(VkClearValue{ .color = edge.options.colorClearValue });
+				}
 			}
 
 			uint32_t width = node->out[0]->width;
@@ -618,20 +706,46 @@ namespace vku {
 			passBeginInfo.framebuffer = node->instances[i].framebuffer;
 			passBeginInfo.renderPass = node->pass;
 
+			// attachments we write to must not be in shader_read_only layout
+			for (auto attachment : node->out) {
+				if (attachment->instances[i].currentLayout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) {
+					VkImageLayout newLayout;
+					if (attachment->schema->isDepth) {
+						newLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+					}
+					else {
+						newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+					}
+					attachment->instances[i].texture->image->transitionImageLayout(cmdbuf, VK_IMAGE_LAYOUT_UNDEFINED, newLayout);
+					attachment->instances[i].currentLayout = newLayout;
+				}
+			}
+
 			vkCmdBindDescriptorSets(cmdbuf, VK_PIPELINE_BIND_POINT_GRAPHICS, node->pipelineLayout, 1, 1, &node->instances[i].descriptorSet->handle, 0, nullptr);
 
 			vkCmdBeginRenderPass(cmdbuf, &passBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
 			{
 				if (node->schema->isBlitPass) {
-					node->blitPassMaterial->bind(cmdbuf);
-					node->blitPassMaterialInstance->bind(cmdbuf, i);
+					node->material->bind(cmdbuf);
+					node->materialInstance->bind(cmdbuf, i);
 					blitMesh->draw(cmdbuf);
 				}
-				if (node->schema->commands != nullptr) {
-					node->schema->commands(i, cmdbuf);
+				else if (node->schema->materialOverride) {
+					node->material->bind(cmdbuf);
+					node->materialInstance->bind(cmdbuf, i);
 				}
+
+				scene->render(cmdbuf, i, node->schema->materialOverride, node->schema->layerMask);
 			}
 			vkCmdEndRenderPass(cmdbuf);
+
+			// update layout state for implicit render pass stuff
+			for (uint32_t k = 0; k < node->schema->out.size(); k++) {
+				const auto& attachment = node->schema->out[k];
+				if (attachment.options.sampled) {
+					node->out[k]->instances[i].currentLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+				}
+			}
 		}
 	}
 }

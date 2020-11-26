@@ -12,7 +12,8 @@
 #include "VulkanDevice.h"
 #include "scene/Scene.h"
 #include "scene/Object.h"
-#include "PbrMaterial.h"
+#include "VulkanMaterial.h"
+#include "TextureCommons.h"
 
 
 /*
@@ -47,19 +48,28 @@ namespace vku {
 		glm::mat4 aabb;
 
 		std::vector<VulkanTexture*> textures;
-		std::vector<PbrMaterial*> materials;
+		std::vector<VulkanMaterial*> materials;
+		std::vector<VulkanMaterialInstance*> materialInstances;
 		std::vector<Node> nodes;
 
 		VulkanGltfModel() {}
 
-		VulkanGltfModel(const std::string& filename, Scene* scene, Pass* pass, VulkanTexture* brdf_lut, VulkanTexture* diffuse_ibl, VulkanTexture* specular_ibl, std::map<std::string, std::string> macros = {}) {
+		VulkanGltfModel(const std::string& filename, Scene* scene, Pass* pass, std::map<std::string, std::string> macros = {}) {
 			tinygltf::Model model;
 
 			tinygltf::TinyGLTF loader;
 			std::string err;
 			std::string warn;
 
-			bool res = loader.LoadBinaryFromFile(&model, &err, &warn, filename);
+
+			bool res;
+
+			if (filename.ends_with("b")) {
+				res = loader.LoadBinaryFromFile(&model, &err, &warn, filename);
+			}
+			else {
+				res = loader.LoadASCIIFromFile(&model, &err, &warn, filename);
+			}
 			if (!warn.empty()) {
 				throw std::runtime_error("TinyGLTF Warning: " + warn);
 			}
@@ -74,7 +84,7 @@ namespace vku {
 				std::cout << "Loaded glTF: " << filename << std::endl;
 
 			loadTextures(scene->device, model);
-			loadMaterials(scene, pass, model, brdf_lut, diffuse_ibl, specular_ibl, macros);
+			loadMaterials(scene, pass, model, macros);
 
 			VulkanMeshData meshData;
 
@@ -138,8 +148,9 @@ namespace vku {
 				VulkanImageInfo info{};
 				info.width = gImage.width;
 				info.height = gImage.height;
+				info.mipLevels = std::ceil(std::log2(std::min(info.width, info.height)));
 				info.format = VK_FORMAT_R8G8B8A8_UNORM;
-				info.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+				info.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
 				image.image = new VulkanImage(device, info);
 				image.image->loadFromBuffer(stagingBuffer);
 
@@ -208,12 +219,15 @@ namespace vku {
 			}
 		}
 
-		void loadMaterials(Scene* scene, Pass* pass, tinygltf::Model& model, VulkanTexture* brdf_lut, VulkanTexture* diffuse_ibl, VulkanTexture* specular_ibl, std::map<std::string, std::string> macros) {
+		void loadMaterials(Scene* scene, Pass* pass, tinygltf::Model& model, std::map<std::string, std::string> macros) {
 			materials.resize(model.materials.size());
+			materialInstances.reserve(model.materials.size());
 
 			for (uint32_t i = 0; i < model.materials.size(); i++) {
 				tinygltf::Material& gMaterial = model.materials[i];
-				PbrMaterial*& material = materials[i];
+
+				VulkanMaterial*& material = materials[i];
+				VulkanMaterialInstance*& matInstance = materialInstances[i];
 
 				int colorTexIdx = gMaterial.pbrMetallicRoughness.baseColorTexture.index;
 				int normalTexIdx = gMaterial.normalTexture.index;
@@ -221,13 +235,38 @@ namespace vku {
 				int emissiveTexIdx = gMaterial.emissiveTexture.index;
 				int aoTexIdx = gMaterial.occlusionTexture.index;
 
-				VulkanTexture* colorTexture = textures[colorTexIdx];
-				VulkanTexture* normalTexture = textures[normalTexIdx];
-				VulkanTexture* metallicTexture = textures[metallicTexIdx];
-				VulkanTexture* emissiveTexture = textures[emissiveTexIdx];
-				VulkanTexture* aoTexture = textures[aoTexIdx];
+				VulkanTexture* colorTexture, * normalTexture, * metallicTexture, * emissiveTexture, * aoTexture;
+				colorTexture = metallicTexture = aoTexture = scene->device->textureCommons->white1x1;
+				emissiveTexture = scene->device->textureCommons->black1x1;
+				normalTexture = scene->device->textureCommons->zNorm;
 
-				material = new PbrMaterial(colorTexture, normalTexture, metallicTexture, emissiveTexture, aoTexture, specular_ibl, diffuse_ibl, brdf_lut, scene, pass, macros);
+				if (colorTexIdx != -1)
+					colorTexture = textures[colorTexIdx];
+				if (normalTexIdx != -1)
+					normalTexture = textures[normalTexIdx];
+				if (metallicTexIdx != -1)
+					metallicTexture = textures[metallicTexIdx];
+				if (emissiveTexIdx != -1)
+					emissiveTexture = textures[emissiveTexIdx];
+				if (aoTexIdx != -1)
+					aoTexture = textures[aoTexIdx];
+
+				VulkanMaterialInfo info{};
+				if (gMaterial.doubleSided) info.rasterizer.cullMode = VK_CULL_MODE_NONE;
+				macros["ALPHA_CUTOFF"] = std::to_string(gMaterial.alphaCutoff);
+
+				info.shaderStages.push_back({ "pbr/pbr_gbuf.vert", macros });
+				info.shaderStages.push_back({ "pbr/pbr_gbuf.frag", macros });
+				material = new VulkanMaterial(&info, scene, pass);
+				matInstance = new VulkanMaterialInstance(material);
+
+				for (uint32_t i = 0; i < matInstance->descriptorSets.size(); i++) {
+					matInstance->descriptorSets[i]->write(0, colorTexture);
+					matInstance->descriptorSets[i]->write(1, normalTexture);
+					matInstance->descriptorSets[i]->write(2, metallicTexture);
+					matInstance->descriptorSets[i]->write(3, emissiveTexture);
+					matInstance->descriptorSets[i]->write(4, aoTexture);
+				}
 			}
 		}
 
@@ -387,7 +426,7 @@ namespace vku {
 
 				for (Primitive& primitive : node.mesh.primitives) {
 					if (primitive.indexCount > 0) {
-						VulkanMaterialInstance* materialInstance = materials[primitive.materialIndex]->matInstance;
+						VulkanMaterialInstance* materialInstance = materialInstances[primitive.materialIndex];
 						if (!noMaterial) {
 							materialInstance->material->bind(commandBuffer);
 							materialInstance->bind(commandBuffer, i);
@@ -421,8 +460,11 @@ namespace vku {
 			for (VulkanTexture* texture : textures) {
 				delete texture;
 			}
-			for (PbrMaterial* material : materials) {
+			for (VulkanMaterial* material : materials) {
 				delete material;
+			}
+			for (VulkanMaterialInstance* materialInst : materialInstances) {
+				delete materialInst;
 			}
 			delete meshBuf;
 		}

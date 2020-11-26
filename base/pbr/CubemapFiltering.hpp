@@ -175,10 +175,22 @@ namespace vku {
 		}
 
 		// Pipeline
-		VulkanMaterialInfo pipelineBuilder(device);
+		VulkanMaterialInfo pipelineBuilder{};
 		pipelineBuilder.rasterizer.cullMode = VK_CULL_MODE_NONE;
-		pipelineBuilder.colorBlendAttachment.blendEnable = VK_FALSE;
-		pipelineBuilder.colorBlendAttachment.blendEnable = VK_FALSE;
+
+		VkPipelineColorBlendAttachmentState blendState{};
+		blendState.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+		blendState.blendEnable = VK_FALSE;
+		blendState.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
+		blendState.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+		blendState.colorBlendOp = VK_BLEND_OP_ADD;
+		blendState.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+		blendState.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
+		blendState.alphaBlendOp = VK_BLEND_OP_ADD;
+		pipelineBuilder.colorBlendAttachments = { blendState };
+		pipelineBuilder.colorBlending.attachmentCount = 1;
+		pipelineBuilder.colorBlending.pAttachments = pipelineBuilder.colorBlendAttachments.data();
+
 		pipelineBuilder.depthStencil.depthTestEnable = VK_FALSE;
 		pipelineBuilder.depthStencil.depthBoundsTestEnable = VK_FALSE;
 		pipelineBuilder.depthStencil.stencilTestEnable = VK_FALSE;
@@ -247,7 +259,6 @@ namespace vku {
 			VkRect2D scissor{};
 			scissor.extent = { dim,dim };
 
-			vkCmdSetViewport(cmdBuf, 0, 1, &viewport);
 			vkCmdSetScissor(cmdBuf, 0, 1, &scissor);
 
 			// Change image layout for all cubemap faces to transfer destination

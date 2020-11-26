@@ -25,7 +25,7 @@ float sdBox( in vec2 p, in vec2 b )
 }
 
 // query the shadowmap cascades. 0 = shadow, 1 = lit
-float exposureToSun(vec3 position, float x) {
+float exposureToSun(vec3 position) {
 	vec4 cascadeProj;
 	float distToBorder;
 	float bias, slopeBias;

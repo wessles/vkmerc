@@ -78,21 +78,9 @@ public:
 
 	VulkanUniform *blurXUniform, *blurYUniform, *highpassUniform, *mergePassUniform;
 
-
-
-	void test() {
-		ShaderCache shaderCache(context->device);
-		shaderCache.get("pbr/pbr.frag");
-	}
-
-
-
-
 	// Inherited via BaseEngine
 	void postInit()
 	{
-		test();
-
 		boxMeshBuf = new VulkanMeshBuffer(context->device, vku::box);
 
 		SceneInfo sInfo{};

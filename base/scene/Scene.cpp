@@ -74,9 +74,11 @@ namespace vku {
 		objects.push_back(object);
 	}
 
-	void Scene::render(VkCommandBuffer cmdBuf, uint32_t swapIdx, bool noMaterial) {
+	void Scene::render(VkCommandBuffer cmdBuf, uint32_t swapIdx, bool noMaterial, uint32_t layerMask) {
 		for (Object* obj : objects) {
-			obj->render(cmdBuf, swapIdx, noMaterial);
+			if ((obj->layer & layerMask) != 0) {
+				obj->render(cmdBuf, swapIdx, noMaterial);
+			}
 		}
 	}
 

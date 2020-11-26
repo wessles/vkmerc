@@ -21,9 +21,6 @@ namespace vku {
 			VulkanTexture* metallicRoughness,
 			VulkanTexture* emissive,
 			VulkanTexture* ao,
-			VulkanTexture* spec_ibl,
-			VulkanTexture* diffuse_ibl,
-			VulkanTexture* brdf_lut,
 			Scene* scene,
 			Pass* pass,
 			std::map<std::string, std::string> macros = {});
@@ -44,9 +41,6 @@ namespace vku {
 
 		TexturelessPbrMaterial(
 			PbrUniform uniform,
-			VulkanTexture* spec_ibl,
-			VulkanTexture* diffuse_ibl,
-			VulkanTexture* brdf_lut,
 			Scene* scene,
 			Pass* pass,
 			std::map<std::string, std::string> macros = {});

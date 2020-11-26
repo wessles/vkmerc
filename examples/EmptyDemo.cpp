@@ -49,36 +49,13 @@ public:
 	RenderGraph* graph;
 	Pass* mainPass;
 
-	VulkanTexture* skybox;
-	VulkanMeshBuffer* boxMeshBuf;
-	VulkanMaterial* mat;
-	VulkanMaterialInstance* matInst;
-
 	std::vector<VkCommandBuffer> cmdBufs;
 
 	// Inherited via BaseEngine
 	void postInit()
 	{
-		boxMeshBuf = new VulkanMeshBuffer(context->device, vku::box);
-
 		SceneInfo sInfo{};
 		scene = new Scene(context->device, sInfo);
-
-		// load skybox texture
-		skybox = new VulkanTexture;
-		skybox->image = new VulkanImage(context->device, {
-			"res/textures/cubemap_day/posx.jpg",
-			"res/textures/cubemap_day/negx.jpg",
-			"res/textures/cubemap_day/posy.jpg",
-			"res/textures/cubemap_day/negy.jpg",
-			"res/textures/cubemap_day/posz.jpg",
-			"res/textures/cubemap_day/negz.jpg"
-			});
-		VulkanImageViewInfo viewInfo{};
-		skybox->image->writeImageViewInfo(&viewInfo);
-		viewInfo.imageViewType = VK_IMAGE_VIEW_TYPE_CUBE;
-		skybox->view = new VulkanImageView(context->device, viewInfo);
-		skybox->sampler = new VulkanSampler(context->device, {});
 
 		flycam = new OrbitCam(context->windowHandle);
 
@@ -86,43 +63,21 @@ public:
 		{
 			VkSampleCountFlagBits msaaCount = VK_SAMPLE_COUNT_8_BIT;
 
-			PassSchema* main = graphSchema->pass("main", [&](uint32_t i, const VkCommandBuffer& cb) {
-				matInst->bind(cb, i);
-				matInst->material->bind(cb);
-				boxMeshBuf->draw(cb);
+			AttachmentSchema* color = graphSchema->attachment("color");
+			color->format = context->device->swapchain->screenFormat;
+			color->isSwapchain = true;
 
-				scene->render(cb, i, false);
-			});
-			main->samples = msaaCount;
+			PassSchema* main = graphSchema->pass("main");
 
-			AttachmentSchema* edge = graphSchema->attachment("color", main, {});
-			edge->format = context->device->swapchain->screenFormat;
-			edge->samples = msaaCount;
-			edge->isSwapchain = true;
-			edge->resolve = true;
+			main->write(0, color);
 
-			AttachmentSchema* depth = graphSchema->attachment("depth", main, {});
-			depth->format = context->device->swapchain->depthFormat;
-			depth->samples = msaaCount;
-			depth->isTransient = true;
-			depth->isDepth = true;
+
 		}
 
 		graph = new RenderGraph(graphSchema, scene, context->device->swapchain->swapChainLength);
 		graph->createLayouts();
 
 		mainPass = graph->getPass("main");
-
-		// skyboxes don't care about depth testing / writing
-		VulkanMaterialInfo matInfo(context->device);
-		matInfo.depthStencil.depthWriteEnable = false;
-		matInfo.depthStencil.depthTestEnable = false;
-		matInfo.rasterizer.frontFace = VK_FRONT_FACE_CLOCKWISE;
-		matInfo.shaderStages.push_back({ "skybox/skybox.frag", {} });
-		matInfo.shaderStages.push_back({ "skybox/skybox.vert", {} });
-		mat = new VulkanMaterial(&matInfo, scene, mainPass);
-		matInst = new VulkanMaterialInstance(mat);
-		for (VulkanDescriptorSet* set : matInst->descriptorSets) { set->write(0, skybox); }
 
 		buildSwapchainDependants();
 	}
@@ -176,11 +131,6 @@ public:
 	void preCleanup()
 	{
 		destroySwapchainDependents();
-
-		delete skybox;
-		delete boxMeshBuf;
-		delete matInst;
-		delete mat;
 
 		delete flycam;
 

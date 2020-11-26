@@ -18,9 +18,7 @@
 #include "VulkanMesh.h"
 
 namespace vku {
-	VulkanMaterialInfo::VulkanMaterialInfo(VulkanDevice* const device) {
-		this->device = device;
-
+	VulkanMaterialInfo::VulkanMaterialInfo() {
 		inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
 		inputAssembly.primitiveRestartEnable = VK_FALSE;
 		inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
@@ -32,27 +30,18 @@ namespace vku {
 		vertexInput.vertexBindingDescriptionCount = 1;
 		vertexInput.vertexAttributeDescriptionCount = static_cast<uint32_t>(vertexAttributeDescriptions.size());
 
+		// we can initialize viewport to all zero, since it is controlled dynamically by default
 		viewport.x = 0.0f;
 		viewport.y = 0.0f;
-		VkExtent2D& swapchainExtent = device->swapchain->swapChainExtent;
-		viewport.width = (float)swapchainExtent.width;
-		viewport.height = (float)swapchainExtent.height;
+		viewport.width = 0;
+		viewport.height = 0;
 		viewport.minDepth = 0.0f;
 		viewport.maxDepth = 1.0f;
 		scissor.offset = { 0, 0 };
-		scissor.extent = swapchainExtent;
+		scissor.extent = {};
 		viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
 		viewportState.viewportCount = 1;
 		viewportState.scissorCount = 1;
-
-		colorBlendAttachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
-		colorBlendAttachment.blendEnable = VK_TRUE;
-		colorBlendAttachment.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
-		colorBlendAttachment.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
-		colorBlendAttachment.colorBlendOp = VK_BLEND_OP_ADD;
-		colorBlendAttachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
-		colorBlendAttachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
-		colorBlendAttachment.alphaBlendOp = VK_BLEND_OP_ADD;
 
 		colorBlending.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
 		colorBlending.logicOpEnable = VK_FALSE;
@@ -122,7 +111,8 @@ namespace vku {
 		vertexInput.pVertexBindingDescriptions = &vertexBindingDescription; // Optional
 		viewportState.pViewports = &viewport;
 		viewportState.pScissors = &scissor;
-		colorBlending.pAttachments = &colorBlendAttachment;
+		colorBlending.attachmentCount = static_cast<uint32_t>(colorBlendAttachments.size());
+		colorBlending.pAttachments = colorBlendAttachments.data();
 		dynamicState.dynamicStateCount = static_cast<uint32_t>(dynamicStateList.size());
 		dynamicState.pDynamicStates = dynamicStateList.data();
 
@@ -165,9 +155,10 @@ namespace vku {
 		for (const ShaderVariant& info : info->shaderStages) {
 			// now compile the actual shader
 			ShaderModule* sModule = this->scene->device->shaderCache->get(info);
-			sModule->registerHotReloadCallback({ [this]() { 
-				rebuild(); 
-			}, (size_t) this });
+			// register callback to rebuild if the shader recompiles
+			sModule->registerHotReloadCallback({ [this]() {
+				rebuild();
+			}, (size_t)this });
 			VkPipelineShaderStageCreateInfo stage = sModule->getStageInfo();
 			shaderModules.push_back(sModule);
 			shaderStages.push_back(stage);
@@ -225,6 +216,28 @@ namespace vku {
 		if (result != VK_SUCCESS) {
 			throw std::runtime_error("Failed to create pipeline layout for material!");
 		}
+
+		// generate color attachment blending states if not specified
+		if (info->colorBlendAttachments.size() == 0) {
+			for (AttachmentSchema* attachment : pass->schema->out) {
+				VkFormatProperties formatProperties;
+				vkGetPhysicalDeviceFormatProperties(scene->device->physicalDevice, attachment->format, &formatProperties);
+				if ((formatProperties.optimalTilingFeatures & VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT) != 0) {
+					VkPipelineColorBlendAttachmentState colorBlendAttachment{};
+					colorBlendAttachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+					colorBlendAttachment.blendEnable = VK_FALSE;
+					colorBlendAttachment.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
+					colorBlendAttachment.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+					colorBlendAttachment.colorBlendOp = VK_BLEND_OP_ADD;
+					colorBlendAttachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+					colorBlendAttachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
+					colorBlendAttachment.alphaBlendOp = VK_BLEND_OP_ADD;
+					info->colorBlendAttachments.push_back(colorBlendAttachment);
+				}
+			}
+		}
+		info->colorBlending.attachmentCount = info->colorBlendAttachments.size();
+		info->colorBlending.pAttachments = info->colorBlendAttachments.data();
 
 		info->pipeline.layout = pipelineLayout;
 		vkCreateGraphicsPipelines(*scene->device, VK_NULL_HANDLE, 1, &info->pipeline, nullptr, &pipeline);

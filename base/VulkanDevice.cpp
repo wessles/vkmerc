@@ -10,6 +10,7 @@
 #include "VulkanContext.h"
 #include "VulkanSwapchain.h"
 #include "shader/ShaderCache.h"
+#include "TextureCommons.h"
 
 namespace vku {
 	bool checkDeviceExtensionSupport(VkPhysicalDevice device, const std::vector<const char*> deviceExtensions) {
@@ -243,9 +244,12 @@ namespace vku {
 
 		// create runtime shader cache
 		this->shaderCache = new ShaderCache(this);
+
+		this->textureCommons = new TextureCommons(this);
 	}
 
 	VulkanDevice::~VulkanDevice() {
+		delete textureCommons;
 		delete shaderCache;
 		delete swapchain;
 		vkDestroyDescriptorPool(handle, descriptorPool, nullptr);

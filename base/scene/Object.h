@@ -12,6 +12,8 @@ namespace vku {
 	struct Scene;
 
 	struct Object {
+		uint32_t layer = 1 << 0;
+
 		Scene* scene;
 		Object* parent;
 

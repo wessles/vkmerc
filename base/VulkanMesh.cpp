@@ -1,5 +1,7 @@
 #include "VulkanMesh.h"
 
+#include <iostream>
+
 #define GLM_ENABLE_EXPERIMENTAL
 #include <glm/gtx/hash.hpp>
 #include <mikktspace.h>
@@ -52,6 +54,21 @@ namespace vku {
 	}
 	bool Vertex::operator==(const Vertex& other) const {
 		return pos == other.pos && color == other.color && texCoord == other.texCoord && normal == other.normal && tangent == other.tangent;
+	}
+
+	void VulkanMeshData::serializeToCpp() {
+		std::cout << "const VulkanMeshData sphere = {\n";
+		std::cout << "\t{\n";
+		for (auto v : vertices) {
+			std::cout << "\t\t{{" << v.pos.x << ", " << v.pos.y << ", " << v.pos.z << "}, {}, {}, {" << v.normal.x << ", " << v.normal.y << ", " << v.normal.z << "}},\n";
+		}
+		std::cout << "\t},\n";
+		std::cout << "\t{\n";
+		for (int i = 0; i < indices.size(); i += 3) {
+			std::cout << "\t\t" << indices[i] << ", " << indices[i + 1] << ", " << indices[i + 2] << ",\n";
+		}
+		std::cout << "\t}\n";
+		std::cout << "};\n";
 	}
 
 	VulkanMeshBuffer::VulkanMeshBuffer(VulkanDevice* device, const VulkanMeshData& mesh) {

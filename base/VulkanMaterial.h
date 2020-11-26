@@ -26,7 +26,7 @@ namespace vku {
 		VkViewport viewport{};
 		VkRect2D scissor{};
 		VkPipelineViewportStateCreateInfo viewportState{};
-		VkPipelineColorBlendAttachmentState colorBlendAttachment{};
+		std::vector<VkPipelineColorBlendAttachmentState> colorBlendAttachments{};
 		VkPipelineColorBlendStateCreateInfo colorBlending{};
 		VkPipelineRasterizationStateCreateInfo rasterizer{};
 		VkPipelineDepthStencilStateCreateInfo depthStencil{};
@@ -39,20 +39,17 @@ namespace vku {
 		VkPipelineDynamicStateCreateInfo dynamicState{};
 
 		std::vector<VkPushConstantRange> pushConstRanges{};
-
 		std::vector<ShaderVariant> shaderStages;
 
-		VulkanDevice* device;
+		VulkanMaterialInfo();
 
-		VulkanMaterialInfo(VulkanDevice* const device);
-	
 		// link pointers inside structs to reference each other
 		// useful right after a copy constructor
 		void linkPointers();
 	};
 
 	struct VulkanMaterial {
-		VulkanMaterialInfo *info;
+		VulkanMaterialInfo* info;
 
 		Scene* scene;
 		Pass* pass;

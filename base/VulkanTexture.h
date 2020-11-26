@@ -24,9 +24,9 @@ namespace vku {
 	struct VulkanImage {
 		VkImage handle;
 		VkDeviceMemory memory;
+		VulkanDevice* device;
 
 	private:
-		VulkanDevice* device;
 		VulkanImageInfo info;
 
 	public:

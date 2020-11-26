@@ -43,7 +43,7 @@ namespace vku {
 		~Scene();
 
 		void addObject(Object* object);
-		void render(VkCommandBuffer cmdBuf, uint32_t swapIdx, bool noMaterial);
+		void render(VkCommandBuffer cmdBuf, uint32_t swapIdx, bool noMaterial, uint32_t layerMask);
 
 		void updateUniforms(uint32_t swapIdx, uint32_t uniformIdx, void* data);
 
