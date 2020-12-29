@@ -19,7 +19,7 @@ This is a `C++20`  / `Vulkan 1.2` renderer. This has been my primary personal pr
 ✅ Bloom Post-processing effect  
 ✅ Tracy Profiler implementation  
 ✅ Deferred Rendering  
-✅ SSAO
+✅ SSAO  
 ✅ `Imgui` for in-demo user interfaces  
 
 **Soon**  
