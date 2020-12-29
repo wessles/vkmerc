@@ -7,6 +7,8 @@
 
 #include <vulkan/vulkan.h>
 
+#include "../util/Semaphore.h"
+
 namespace vku {
 	struct VulkanDevice;
 	struct ShaderVariant;
@@ -37,10 +39,12 @@ namespace vku {
 		ShaderModule* get(const ShaderVariant& variant);
 		ShaderModule* get(size_t hash);
 
-		void hotReloadCheck();
+		void hotReloadCheck(Semaphore* initiateReload, Semaphore* allowContinue, std::atomic<bool> *requestReloadFlag);
 
 		~ShaderCache();
 	};
+
+	void hotReloadCheckingThread(ShaderCache* shaderCache, Semaphore* initiateReload, Semaphore* allowContinue, std::atomic<bool>* requestReloadFlag, std::atomic<bool>* reloadThreadKill);
 }
 
 namespace std {

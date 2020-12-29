@@ -1,10 +1,5 @@
 ﻿{
-  // These environment variables apply to all configurations.
-  "environments": [
-    {
-      "VK_INSTANCE_LAYERS": "VK_LAYER_LUNARG_monitor"
-    }
-  ],
+  "environments": [ { "VK_INSTANCE_LAYERS": "VK_LAYER_LUNARG_monitor" } ],
   "configurations": [
     {
       "name": "x64-Debug",
@@ -16,7 +11,41 @@
       "cmakeCommandArgs": "",
       "buildCommandArgs": "",
       "ctestCommandArgs": "",
-      "variables": []
+      "variables": [
+        {
+          "name": "TRACY",
+          "value": "false",
+          "type": "BOOL"
+        },
+        {
+          "name": "VK_VALIDATION",
+          "value": "true",
+          "type": "BOOL"
+        }
+      ]
+    },
+    {
+      "name": "x64-Tracy",
+      "generator": "Ninja",
+      "configurationType": "Debug",
+      "buildRoot": "${projectDir}\\out\\build\\${name}",
+      "installRoot": "${projectDir}\\out\\install\\${name}",
+      "cmakeCommandArgs": "",
+      "buildCommandArgs": "",
+      "ctestCommandArgs": "",
+      "inheritEnvironments": [ "msvc_x64_x64" ],
+      "variables": [
+        {
+          "name": "TRACY",
+          "value": "true",
+          "type": "BOOL"
+        },
+        {
+          "name": "VK_VALIDATION",
+          "value": "false",
+          "type": "BOOL"
+        }
+      ]
     },
     {
       "name": "x64-Release",
@@ -28,7 +57,18 @@
       "buildCommandArgs": "",
       "ctestCommandArgs": "",
       "inheritEnvironments": [ "msvc_x64_x64" ],
-      "variables": []
+      "variables": [
+        {
+          "name": "TRACY",
+          "value": "false",
+          "type": "BOOL"
+        },
+        {
+          "name": "VK_VALIDATION",
+          "value": "false",
+          "type": "BOOL"
+        }
+      ]
     }
   ]
 }

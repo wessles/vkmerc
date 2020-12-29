@@ -197,6 +197,4 @@ void main()
 	outLight.rgb = outLight.rgb*whiteScale;
 
 	outLight.rgb = pow(outLight.rgb, vec3(1.0/2.0));
-
-	outLight *= smoothstep(1.0, 0.0, length(inPosition) / abs(sin(global.time) * 10.0));
 }

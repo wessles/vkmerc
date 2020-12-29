@@ -1,5 +1,7 @@
 #include "ShaderCache.h"
 
+#include <Tracy.hpp>
+
 // include stat command, independent of win32 or unix based
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -243,7 +245,7 @@ namespace vku {
 		return shader;
 	}
 
-	void ShaderCache::hotReloadCheck() {
+	void ShaderCache::hotReloadCheck(Semaphore* initiateReload, Semaphore* allowContinue, std::atomic<bool> *requestReloadFlag) {
 		std::unordered_set<ShaderCacheHotReloadCallback> callbacks{};
 		std::vector<ShaderModule*> condemnedToDeletion{};
 		for (auto& cached : runtimeShaderCache) {
@@ -301,10 +303,20 @@ namespace vku {
 		}
 
 		if (callbacks.size() > 0) {
-			vkQueueWaitIdle(device->graphicsQueue);
-			vkQueueWaitIdle(device->presentQueue);
-			for (ShaderCacheHotReloadCallback callback : callbacks) {
-				callback.fun();
+			{
+				ZoneScopedNC("Requesting Reload", 0xFF0000);
+				requestReloadFlag->store(true);
+				initiateReload->acquire();
+				vkQueueWaitIdle(device->graphicsQueue);
+				vkQueueWaitIdle(device->presentQueue);
+			}
+
+			{
+				ZoneScopedNC("Reload Callbacks", 0x00FF00);
+				for (ShaderCacheHotReloadCallback callback : callbacks) {
+					callback.fun();
+				}
+				allowContinue->release();
 			}
 		}
 
@@ -316,6 +328,20 @@ namespace vku {
 	ShaderCache::~ShaderCache() {
 		for (auto& cached : runtimeShaderCache) {
 			delete cached.second;
+		}
+	}
+	
+	void hotReloadCheckingThread(ShaderCache* shaderCache, Semaphore* initiateReload, Semaphore* allowContinue, std::atomic<bool>* requestReloadFlag, std::atomic<bool>* reloadThreadKill) {
+		tracy::SetThreadName("Shader Hot Reloader");
+		while (true) {
+			{
+				ZoneScopedN("Shader Cached Reload Check");
+				shaderCache->hotReloadCheck(initiateReload, allowContinue, requestReloadFlag);
+			}
+			std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+			if (reloadThreadKill->load()) {
+				break;
+			}
 		}
 	}
 }

@@ -4,6 +4,7 @@
 #include <functional>
 #include <array>
 
+#include <TracyVulkan.hpp>
 #include <vulkan/vulkan.h>
 
 #include "VulkanTexture.h"
@@ -49,6 +50,10 @@ namespace vku {
 	struct PassSchema {
 		std::string name;
 
+#ifdef TRACY_ENABLE
+		tracy::SourceLocationData tracyGpuZoneInfo;
+#endif
+
 		std::vector<PassAttachmentRead> in;
 		std::vector<PassAttachmentWrite> out;
 
@@ -64,6 +69,10 @@ namespace vku {
 
 		PassSchema(const std::string name) {
 			this->name = name;
+#ifdef TRACY_ENABLE
+			this->tracyGpuZoneInfo = {};
+			this->tracyGpuZoneInfo.name = this->name.c_str();
+#endif
 		}
 
 		PassAttachmentRead* read(size_t slot, AttachmentSchema* in, PassReadOptions options = {});

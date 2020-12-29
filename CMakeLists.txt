@@ -23,6 +23,17 @@ set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} /MD")
 
 include_directories(external)
 include_directories(base)
+include_directories(tracy)
+
+IF(TRACY)
+	add_compile_options("-DTRACY_ENABLE")
+	message("Enabled Tracy.")
+ENDIF(TRACY)
+
+IF(VK_VALIDATION)
+	add_compile_options("-DVK_VALIDATION")
+	message("Enabled Vulkan validation.")
+ENDIF(VK_VALIDATION)
 
 add_subdirectory(base)
 add_subdirectory(examples)

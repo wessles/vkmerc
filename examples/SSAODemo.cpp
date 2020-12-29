@@ -1,3 +1,5 @@
+#include <Tracy.hpp>
+
 #include <iostream>
 #include <filesystem>
 
@@ -38,6 +40,18 @@
 
 using namespace std;
 using namespace vku;
+
+void* operator new(std::size_t count)
+{
+	auto ptr = malloc(count);
+	TracyAlloc(ptr, count);
+	return ptr;
+}
+void operator delete(void* ptr) noexcept
+{
+	TracyFree(ptr);
+	free(ptr);
+}
 
 class Engine : public BaseEngine {
 public:
@@ -368,30 +382,49 @@ public:
 	int timesDrawn = 0;
 	VkCommandBuffer draw(uint32_t i)
 	{
-		updateUniforms(i);
+		{
+			ZoneScopedN("Uniforms Updating");
 
-		gui->NextFrame();
-		ImGui::Begin("AO Demo");
-		ImGui::SliderFloat("Light Zenith", &lightZenith, 0.0f, 3.14f);
-		ImGui::SliderFloat("Light Azimuth", &lightAzimuth, 0.0f, 6.28f);
-		ImGui::SliderFloat("AO Intensity", &ssaoRadius, 0, 1);
-		ImGui::Checkbox("Enable AO", &aoEnabled);
-		if (aoEnabled)
-			ssao.intensity = ssaoRadius;
-		else
-			ssao.intensity = 0.0;
-		ImGui::SliderInt("Blur Size", &ssaoHorizBlurParams.pixelStep, 0.f, 8.f);
-		ssaoVertiBlurParams.pixelStep = ssaoHorizBlurParams.pixelStep;
-		ImGui::End();
-		gui->InternalRender();
+			updateUniforms(i);
+		}
+		
+		{
+			ZoneScopedN("ImGUI Processing");
+			gui->NextFrame();
+			ImGui::Begin("AO Demo");
+			ImGui::SliderFloat("Light Zenith", &lightZenith, 0.0f, 3.14f);
+			ImGui::SliderFloat("Light Azimuth", &lightAzimuth, 0.0f, 6.28f);
+			ImGui::SliderFloat("AO Intensity", &ssaoRadius, 0, 1);
+			ImGui::Checkbox("Enable AO", &aoEnabled);
+			if (aoEnabled)
+				ssao.intensity = ssaoRadius;
+			else
+				ssao.intensity = 0.0;
+			ImGui::SliderInt("Blur Size", &ssaoHorizBlurParams.pixelStep, 0.f, 8.f);
+			ssaoVertiBlurParams.pixelStep = ssaoHorizBlurParams.pixelStep;
+			ImGui::End();
+			gui->InternalRender();
+		}
 
-		if (timesDrawn >= cmdBufs.size())
+		if (timesDrawn >= cmdBufs.size()) {
+			ZoneScopedN("Resetting Command Buffer");
 			vkResetCommandBuffer(cmdBufs[i], 0);
+		}
 		else
 			timesDrawn++;
-		cmdBufs[i] = context->device->beginCommandBuffer();
-		graph->render(cmdBufs[i], i);
-		vkEndCommandBuffer(cmdBufs[i]);
+
+		{
+			ZoneScopedN("Begin Command Buffer");
+			cmdBufs[i] = context->device->beginCommandBuffer();
+		}
+		{
+			ZoneScopedN("Graph Recording");
+			graph->render(cmdBufs[i], i);
+		}
+		{
+			ZoneScopedN("End Command Buffer");
+			vkEndCommandBuffer(cmdBufs[i]);
+		}
 
 		return cmdBufs[i];
 	}

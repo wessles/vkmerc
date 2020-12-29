@@ -1,3 +1,7 @@
+#include <TracyVulkan.hpp>
+
+#include "VulkanContext.h"
+
 #include "RenderGraph.h"
 #include "../scene/Scene.h"
 
@@ -657,6 +661,7 @@ namespace vku {
 		}
 	}
 
+
 	void RenderGraph::render(VkCommandBuffer cmdbuf, uint32_t i) {
 		// we'll set width/height in the loop
 		VkViewport viewport{};
@@ -723,6 +728,11 @@ namespace vku {
 
 			vkCmdBindDescriptorSets(cmdbuf, VK_PIPELINE_BIND_POINT_GRAPHICS, node->pipelineLayout, 1, 1, &node->instances[i].descriptorSet->handle, 0, nullptr);
 
+			// mark the GPU zone for profiling
+#ifdef TRACY_ENABLE
+			tracy::VkCtxScope __tracy_gpu_zone_x(device->context->tracyContext, &node->schema->tracyGpuZoneInfo, cmdbuf, true);
+#endif
+
 			vkCmdBeginRenderPass(cmdbuf, &passBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
 			{
 				if (node->schema->isBlitPass) {
@@ -747,5 +757,7 @@ namespace vku {
 				}
 			}
 		}
+
+		TracyVkCollect(device->context->tracyContext, cmdbuf);
 	}
 }

@@ -17,10 +17,12 @@ This is a `C++20`  / `Vulkan 1.2` renderer. This has been my primary personal pr
 ✅ Cascaded Shadow-maps  
 ✅ `Imgui` for in-demo user interfaces  
 ✅ Bloom Post-processing effect  
+✅ Tracy Profiler implementation  
+✅ Deferred Rendering  
+✅ SSAO
 
 **Soon**  
-⬜ SSAO / HBAO  
-⬜ Deferred Rendering  
+⬜ HBAO  
 ⬜ HDR  
 ⬜ Poisson Filtering of Shadowmaps  
 ⬜ Temporal Antialiasing  

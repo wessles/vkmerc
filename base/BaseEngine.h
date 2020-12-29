@@ -1,5 +1,7 @@
 #pragma once
 
+#include <Tracy.hpp>
+
 #include <vulkan/vulkan.h>
 
 #include <string>
@@ -11,16 +13,9 @@
 
 #include <VulkanContext.h>
 
+#include "util/Semaphore.h"
+
 namespace vku {
-	/*
-		A class which provides an empty Vulkan application.
-		It takes care of boilerplate stuff so you can limit
-		your concern to Demo-specific things. It handles:
-		- Vulkan initialization
-		- Resizing callbacks
-		- Synchronization
-		- Game-loop
-	*/
 	struct BaseEngine {
 		VulkanContext* context;
 
@@ -37,7 +32,6 @@ namespace vku {
 		bool fullscreen = false;
 		double framerateLimit = 120.0;
 		uint32_t width = 800, height = 600;
-		bool debugEnabled = true;
 		bool shaderHotReloadEnabled = true;
 
 	private:
@@ -57,7 +51,6 @@ namespace vku {
 			info.title = windowTitle;
 			info.width = width;
 			info.height = height;
-			info.debugEnabled = debugEnabled;
 			info.haltOnValidationError = false;
 			info.fullscreen = fullscreen;
 
@@ -91,30 +84,55 @@ namespace vku {
 
 		void loop() {
 			using clock = std::chrono::steady_clock;
-			auto next_frame = clock::now();
-			const auto step = std::chrono::milliseconds((int)(1000.0 / framerateLimit));
+			const auto frame_length_target = std::chrono::microseconds((int)(1000000.0 / framerateLimit));
 
-			while (!glfwWindowShouldClose(context->windowHandle)) {
-				// framerate limiting
-				next_frame += step;
-				std::this_thread::sleep_until(next_frame);
+			// kick off shader reload thread if need be
+			std::thread hotReloadThread;
+			Semaphore *initiateReload, *allowContinue;
+			std::atomic<bool> requestReloadFlag(false);
+			std::atomic<bool> reloadThreadKill(false);
+			if (shaderHotReloadEnabled) {
+				initiateReload = new Semaphore();
+				allowContinue = new Semaphore();
+				hotReloadThread = std::thread(&vku::hotReloadCheckingThread, context->device->shaderCache, initiateReload, allowContinue, &requestReloadFlag, &reloadThreadKill);
+			}
 
+			while (true) {
+				auto frame_start = clock::now();
 
-				glfwPollEvents();
+				{
+					ZoneScopedNC("Window Polling", 0xAAAAFF);
+					if (glfwWindowShouldClose(context->windowHandle))
+						break;
+					glfwPollEvents();
+				}
 
-				if(shaderHotReloadEnabled)
-					context->device->shaderCache->hotReloadCheck();
+				if (shaderHotReloadEnabled) {
+					ZoneScopedNC("Shader Hot-Reload Check", 0xFF5555);
+					if (requestReloadFlag.load()) {
+						requestReloadFlag.store(false);
+						initiateReload->release();
+						allowContinue->acquire();
+					}
+				}
 
 				VulkanSwapchain& swapchain = *context->device->swapchain;
 				{
-					vkWaitForFences(*context->device, 1, &swapchain.inFlightFences[currentFrame], VK_TRUE, UINT64_MAX);
+					{
+						ZoneScopedN("(VK) Waiting for Swapchain Flight Fences");
+						vkWaitForFences(*context->device, 1, &swapchain.inFlightFences[currentFrame], VK_TRUE, UINT64_MAX);
+					}
 
 					uint32_t imageIndex;
-					VkResult result = vkAcquireNextImageKHR(*context->device, swapchain, UINT64_MAX,
-						swapchain.imageAvailableSemaphores[currentFrame], VK_NULL_HANDLE, &imageIndex);
-
+					VkResult result;
+					{
+						ZoneScopedN("(VK) Acquire Next Image");
+						result = vkAcquireNextImageKHR(*context->device, swapchain, UINT64_MAX,
+							swapchain.imageAvailableSemaphores[currentFrame], VK_NULL_HANDLE, &imageIndex);
+					}
 					// check for out of date swap chain
 					if (result == VK_ERROR_OUT_OF_DATE_KHR) {
+						ZoneScopedN("Refreshing swapchain due to invalidation");
 						refreshSwapchain();
 						continue;
 					}
@@ -124,6 +142,7 @@ namespace vku {
 
 					// Check if a previous frame is using this image (i.e. there is its fence to wait on)
 					if (swapchain.imagesInFlight[imageIndex] != VK_NULL_HANDLE) {
+						ZoneScopedN("(VK) Waiting for Image Flight Fences");
 						vkWaitForFences(*context->device, 1, &swapchain.imagesInFlight[imageIndex], VK_TRUE, UINT64_MAX);
 					}
 					// Mark the image as now being in use by this frame
@@ -138,16 +157,22 @@ namespace vku {
 					submitInfo.pWaitDstStageMask = waitStages;
 					submitInfo.commandBufferCount = 1;
 
-					VkCommandBuffer commandBuffer = this->draw(imageIndex);
+					VkCommandBuffer commandBuffer;
+					{
+						ZoneScopedN("Recording Commmand Buffer");
+						commandBuffer = this->draw(imageIndex);
+					}
 					submitInfo.pCommandBuffers = &commandBuffer;
 
 					VkSemaphore signalSemaphores[] = { swapchain.renderFinishedSemaphores[currentFrame] };
 					submitInfo.signalSemaphoreCount = 1;
 					submitInfo.pSignalSemaphores = signalSemaphores;
-
-					vkResetFences(*context->device, 1, &swapchain.inFlightFences[currentFrame]);
-					if (vkQueueSubmit(context->device->graphicsQueue, 1, &submitInfo, swapchain.inFlightFences[currentFrame]) != VK_SUCCESS) {
-						throw std::runtime_error("Failed to submit draw command buffer!");
+					{
+						ZoneScopedN("Submitting Command Buffer");
+						vkResetFences(*context->device, 1, &swapchain.inFlightFences[currentFrame]);
+						if (vkQueueSubmit(context->device->graphicsQueue, 1, &submitInfo, swapchain.inFlightFences[currentFrame]) != VK_SUCCESS) {
+							throw std::runtime_error("Failed to submit draw command buffer!");
+						}
 					}
 
 					VkPresentInfoKHR presentInfo{};
@@ -161,8 +186,10 @@ namespace vku {
 					presentInfo.pSwapchains = swapChains;
 					presentInfo.pImageIndices = &imageIndex;
 					presentInfo.pResults = nullptr; // Optional
-
-					result = vkQueuePresentKHR(context->device->presentQueue, &presentInfo);
+					{
+						ZoneScopedN("Presenting Swapchains");
+						result = vkQueuePresentKHR(context->device->presentQueue, &presentInfo);
+					}
 
 					if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR || framebufferResized) {
 						framebufferResized = false;
@@ -174,8 +201,22 @@ namespace vku {
 
 					currentFrame = (currentFrame + 1) % swapchain.swapChainLength;
 				}
-			}
 
+				// framerate limiting
+				{
+					ZoneScopedNC("Frame Limiting", 0xFFAAAA);
+					auto target = frame_start + frame_length_target;
+					auto duration = clock::now() - frame_start;
+					{
+						ZoneScopedNC("Spin Lock (Precise, but 100%CPU)", 0xAAFFAA);
+						while (clock::now() < target) {}
+					}
+				}
+
+				FrameMark;
+			}
+			reloadThreadKill.store(true);
+			hotReloadThread.join();
 			vkDeviceWaitIdle(*context->device);
 		}
 	};

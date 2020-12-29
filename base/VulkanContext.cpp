@@ -11,12 +11,9 @@ namespace vku {
 	static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity, VkDebugUtilsMessageTypeFlagsEXT messageType, const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData, void* pUserData) {
 		if (messageSeverity == VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT || messageSeverity == VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT) {
 			std::cerr << pCallbackData->pMessage << std::endl;
-			// let warnings pass without crashing
 			VulkanContext* context = static_cast<VulkanContext*>(pUserData);
-			if (context->haltOnValidationError) {
-				std::cerr << "Halting on validation error." << std::endl;
-				std::cin.get();
-			}
+			std::cerr << "Halting on validation error." << std::endl;
+			std::cin.get();
 		}
 
 		return VK_TRUE;
@@ -86,14 +83,18 @@ namespace vku {
 	}
 
 	VulkanContext::VulkanContext(VulkanContextInfo info) {
-		this->debugEnabled = info.debugEnabled;
-		this->haltOnValidationError = info.haltOnValidationError;
 		this->resizeCallback = info.resizeCallback;
 		createWindow(info);
 		createVulkanInstance(info);
+		VkCommandBuffer tracySetupCommandBuf = device->createCommandBuffer(true);
+		this->tracyContext = TracyVkContextCalibrated(device->physicalDevice, device->handle, device->graphicsQueue, tracySetupCommandBuf,
+			(PFN_vkGetPhysicalDeviceCalibrateableTimeDomainsEXT)vkGetInstanceProcAddr(instance, "vkGetPhysicalDeviceCalibrateableTimeDomainsEXT"),
+			(PFN_vkGetCalibratedTimestampsEXT)vkGetInstanceProcAddr(instance, "vkGetCalibratedTimestampsEXT"));
+		vkFreeCommandBuffers(*device, device->commandPool, 1, &tracySetupCommandBuf);
 	}
 
 	VulkanContext::~VulkanContext() {
+		TracyVkDestroy(this->tracyContext);
 		destroyVulkanInstance();
 		destroyWindow();
 	}
@@ -130,67 +131,64 @@ namespace vku {
 	void VulkanContext::createVulkanInstance(VulkanContextInfo& info)
 	{
 		// Create VkInstance and hook the validation layer in
-		{
-			if (this->debugEnabled) {
-				if (!checkValidationLayerSupport(info.validationLayers)) {
-					throw std::runtime_error("Validation layers requested, but not available!");
-				}
-				else {
-					std::cout << "Will attempt to enable validation layer" << std::endl;
-				}
-			}
-
-			// basic information about the instance
-			VkApplicationInfo appInfo{};
-			appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
-			appInfo.pApplicationName = info.title.c_str();
-			appInfo.applicationVersion = VK_MAKE_VERSION(1, 0, 0);
-			appInfo.pEngineName = "vkmerc";
-			appInfo.engineVersion = VK_MAKE_VERSION(1, 0, 0);
-			appInfo.apiVersion = VK_API_VERSION_1_2;
-
-			// creation definition begins, pass app info
-			VkInstanceCreateInfo createInfo{};
-			createInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
-			createInfo.pApplicationInfo = &appInfo;
-
-			// find required extensions from GLFW
-			auto extensions = getRequiredGLFWExtensions();
-			if (this->debugEnabled) {
-				extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
-			}
-			createInfo.enabledExtensionCount = static_cast<uint32_t>(extensions.size());
-			createInfo.ppEnabledExtensionNames = extensions.data();
-
-			// enable validation layers if need be
-			VkDebugUtilsMessengerCreateInfoEXT debugCreateInfo;
-			if (this->debugEnabled) {
-				createInfo.enabledLayerCount = static_cast<uint32_t>(info.validationLayers.size());
-				createInfo.ppEnabledLayerNames = info.validationLayers.data();
-
-				getDebugMessengerCreateInfo(debugCreateInfo, this);
-				createInfo.pNext = (VkDebugUtilsMessengerCreateInfoEXT*)&debugCreateInfo;
-			}
-			else {
-				createInfo.enabledLayerCount = 0;
-				createInfo.pNext = nullptr;
-			}
-
-			VkResult result = vkCreateInstance(&createInfo, nullptr, &this->instance);
-			if (result != VK_SUCCESS) {
-				throw std::runtime_error("Failed to create Vulkan instance!");
-			}
-
-			if (this->debugEnabled) {
-				// enumerate possible extensions
-				std::cout << "The following extensions are available:\n";
-				for (const auto& ext : extensions) {
-					std::cout << '\t' << ext << '\n';
-				}
-
-				this->debugMessenger = setupDebugMessenger(this);
-			}
+#ifdef VK_VALIDATION
+		if (!checkValidationLayerSupport(info.validationLayers)) {
+			throw std::runtime_error("Validation layers requested, but not available!");
 		}
+		else {
+			std::cout << "Will attempt to enable validation layer" << std::endl;
+		}
+#endif
+
+		// basic information about the instance
+		VkApplicationInfo appInfo{};
+		appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
+		appInfo.pApplicationName = info.title.c_str();
+		appInfo.applicationVersion = VK_MAKE_VERSION(1, 0, 0);
+		appInfo.pEngineName = "vkmerc";
+		appInfo.engineVersion = VK_MAKE_VERSION(1, 0, 0);
+		appInfo.apiVersion = VK_API_VERSION_1_2;
+
+		// creation definition begins, pass app info
+		VkInstanceCreateInfo createInfo{};
+		createInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
+		createInfo.pApplicationInfo = &appInfo;
+
+		// find required extensions from GLFW
+		auto extensions = getRequiredGLFWExtensions();
+#ifdef VK_VALIDATION
+			extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+#endif
+		createInfo.enabledExtensionCount = static_cast<uint32_t>(extensions.size());
+		createInfo.ppEnabledExtensionNames = extensions.data();
+
+		// enable validation layers if need be
+		VkDebugUtilsMessengerCreateInfoEXT debugCreateInfo;
+#ifdef VK_VALIDATION
+		createInfo.enabledLayerCount = static_cast<uint32_t>(info.validationLayers.size());
+		createInfo.ppEnabledLayerNames = info.validationLayers.data();
+
+		getDebugMessengerCreateInfo(debugCreateInfo, this);
+		createInfo.pNext = (VkDebugUtilsMessengerCreateInfoEXT*)&debugCreateInfo;
+#else
+		createInfo.enabledLayerCount = 0;
+		createInfo.pNext = nullptr;
+#endif
+
+
+		std::cout << "Extensions:\n";
+		for (const auto& ext : extensions) {
+			std::cout << '\t' << ext << '\n';
+		}
+
+		VkResult result = vkCreateInstance(&createInfo, nullptr, &this->instance);
+		if (result != VK_SUCCESS) {
+			throw std::runtime_error("Failed to create Vulkan instance!");
+		}
+
+#ifdef VK_VALIDATION
+		this->debugMessenger = setupDebugMessenger(this);
+#endif
 
 		// Create Surface
 		if (glfwCreateWindowSurface(instance, windowHandle, nullptr, &surface) != VK_SUCCESS) {

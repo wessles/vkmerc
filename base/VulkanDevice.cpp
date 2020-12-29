@@ -137,7 +137,7 @@ namespace vku {
 	{
 		this->context = info.context;
 
-		const std::vector<const char*> extensions = { VK_KHR_SWAPCHAIN_EXTENSION_NAME };
+		const std::vector<const char*> extensions = { VK_KHR_SWAPCHAIN_EXTENSION_NAME, VK_EXT_CALIBRATED_TIMESTAMPS_EXTENSION_NAME };
 
 		// find the best physical device
 		{

@@ -1,5 +1,8 @@
 #pragma once
 
+#include <Tracy.hpp>
+#include <TracyVulkan.hpp>
+
 #include <string>
 #include <vector>
 #include <functional>
@@ -24,8 +27,6 @@ namespace vku {
 
 	/* Responsible for creating a window with a VkInstance, surface and VkDevice attached to it. */
 	struct VulkanContext {
-		bool debugEnabled;
-		bool haltOnValidationError;
 		std::function<void(GLFWwindow*, int, int)> resizeCallback;
 
 		GLFWwindow* windowHandle;
@@ -35,6 +36,8 @@ namespace vku {
 		VkSurfaceKHR surface;
 
 		VulkanDevice* device;
+
+		TracyVkCtx tracyContext;
 
 		VulkanContext(VulkanContextInfo info);
 		~VulkanContext();
